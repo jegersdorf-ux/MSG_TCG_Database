@@ -83,7 +83,7 @@ def run_update():
         with open(JSON_FILE, 'r', encoding='utf-8') as f:
             try:
                 raw_list = json.load(f)
-                existing_db = {item['card_id']: item for item in raw_list}
+                existing_db = {item['cardNo']: item for item in raw_list} # Updated to use cardNo
             except json.JSONDecodeError:
                 existing_db = {}
     else:
@@ -104,8 +104,9 @@ def run_update():
     print(f"API returned {len(api_data)} cards.")
     updates_count = 0
     
-    # 3. Process Cards (THE CATCH-ALL STRATEGY)
+    # 3. Process Cards
     for card in api_data:
+        # VITAL: Map the API's "cardNo" to our "cardNo"
         card_id = card.get('cardNo')
         original_image_url = card.get('image')
         
@@ -124,21 +125,37 @@ def run_update():
             cloud_url = upload_image_to_cloudinary(session, original_image_url, card_id)
             
             if cloud_url:
-                # --- STRATEGY: START WITH EVERYTHING ---
-                clean_record = card.copy() 
-                
-                # --- NORMALIZE CRITICAL FIELDS FOR APP ---
-                clean_record["card_id"] = card_id
-                clean_record["cloudinary_url"] = cloud_url
-                clean_record["last_updated"] = str(datetime.datetime.now())
+                # --- CREATE THE NEW RECORD ---
+                clean_record = {}
 
-                # --- ENSURE COMPATIBILITY ---
-                # We also explicitly map the fields our App *currently* expects
-                # so we don't break the existing Seeder.
-                clean_record["set"] = card.get('series', 'Unknown')
-                clean_record["text"] = card.get('effect') or card.get('text', '')
-                clean_record["power"] = card.get('bp') or card.get('power', 0)
-                clean_record["type"] = card.get('cardType', 'Unit')
+                # 1. PRIMARY IDENTITY
+                clean_record["cardNo"] = card_id
+                clean_record["originalId"] = card.get('originalId') or card_id # Fallback if missing
+                clean_record["name"] = card.get('name', 'Unknown')
+                clean_record["series"] = card.get('series', 'Unknown')
+
+                # 2. STATS (Mapped to your new Database Names)
+                clean_record["cost"] = card.get('cost', 0)
+                clean_record["color"] = card.get('color', 'Unknown')
+                clean_record["rarity"] = card.get('rarity', 'Common')
+                
+                # New Mappings
+                clean_record["apData"] = card.get('apData') or card.get('bp') or 0
+                clean_record["effectData"] = card.get('effectData') or card.get('effect') or card.get('text') or ''
+                clean_record["categoryData"] = card.get('categoryData') or card.get('cardType') or 'Unit'
+
+                # 3. IMAGES & METADATA
+                clean_record["image"] = cloud_url # Renamed from cloudinary_url
+                clean_record["cloudinary_url"] = cloud_url # Keep legacy just in case
+                clean_record["original_image_url"] = original_image_url
+                
+                # 4. FULL DUMP (Future Proofing)
+                # We save the raw keys too, just in case
+                for key, value in card.items():
+                    if key not in clean_record:
+                        clean_record[key] = value
+
+                clean_record["last_updated"] = str(datetime.datetime.now())
                 
                 existing_db[card_id] = clean_record
                 updates_count += 1
