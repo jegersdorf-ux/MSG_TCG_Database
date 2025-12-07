@@ -80,18 +80,41 @@ def process_images(data):
 
 # --- STEP 3: SAVE JSON ---
 def save_database(data, cloud_image_url):
-    final_record = {
+    # 1. Create the new record
+    new_record = {
         "last_updated": str(datetime.datetime.now()),
-        "card_name": data['card_name'],
-        "price": data['price'],
-        "status": data['stock'],
+        "card_name": data.get('card_name', 'Unknown'),
+        "price": data.get('price', 0),
+        "status": data.get('stock', 'Unknown'),
         "image_url": cloud_image_url or "No Image Available"
     }
+
+    # 2. Load existing data (if it exists)
+    db_file = "data.json"
+    if os.path.exists(db_file):
+        with open(db_file, "r") as f:
+            try:
+                # Load the current list of cards
+                existing_data = json.load(f)
+                # Ensure it's a list (in case the old file was just a dictionary)
+                if not isinstance(existing_data, list):
+                    existing_data = [existing_data]
+            except json.JSONDecodeError:
+                existing_data = []
+    else:
+        existing_data = []
+
+    # 3. Append the new record to the list
+    existing_data.append(new_record)
+
+    # Optional: Keep only the last 100 records to prevent the file from getting too huge
+    # existing_data = existing_data[-100:]
+
+    # 4. Save the FULL list back to the file
+    with open(db_file, "w") as f:
+        json.dump(existing_data, f, indent=2)
     
-    # Update data.json
-    with open("data.json", "w") as f:
-        json.dump(final_record, f, indent=2)
-    print("Database saved to data.json")
+    print(f"Database updated. Total records: {len(existing_data)}")
 
 # --- MAIN EXECUTION ---
 if __name__ == "__main__":
@@ -103,3 +126,4 @@ if __name__ == "__main__":
     
     # 3. Save everything
     save_database(raw_data, new_image_url)
+
