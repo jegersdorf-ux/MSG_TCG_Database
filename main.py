@@ -27,37 +27,37 @@ HEADERS = {
 }
 
 def upload_image_to_cloudinary(image_url, public_id):
+    """
+    Uploads image to Cloudinary and returns the CLOUDINARY URL.
+    """
     try:
+        # 1. Check if already exists to save bandwidth (Optional)
         try:
             res = cloudinary.api.resource(f"gundam_cards/{public_id}")
             return res['secure_url'] 
         except cloudinary.exceptions.NotFound:
             pass 
 
+        # 2. Upload
         result = cloudinary.uploader.upload(
             image_url,
             public_id=f"gundam_cards/{public_id}",
             unique_filename=False,
             overwrite=True
         )
-        return result['secure_url']
+        return result['secure_url'] 
     except Exception as e:
         print(f"   ❌ Cloudinary Error ({public_id}): {e}")
-        return image_url
+        return image_url # Fallback to official URL if upload fails
 
 def discover_sets():
-    """
-    Probes sets sequentially.
-    STOPS only after 2 consecutive failures.
-    """
     print("🔍 Probing for sets...")
     found_sets = []
     prefixes = ["ST", "GD", "PR", "UT"] 
     
     for prefix in prefixes:
         print(f"   Checking {prefix} series...", end="")
-        set_miss_streak = 0 # Track missing sets
-        
+        set_miss_streak = 0
         for i in range(1, 20): 
             set_code = f"{prefix}{i:02d}" 
             test_card = f"{set_code}-001"
@@ -66,41 +66,30 @@ def discover_sets():
             exists = False
             try:
                 resp = requests.get(url, headers=HEADERS, timeout=3)
-                # FIX: Check if it redirected to the main list (Soft 404)
                 if resp.status_code == 200 and "cardlist" not in resp.url:
                     soup = BeautifulSoup(resp.content, "html.parser")
                     if soup.select_one(".cardName, h1"):
                         exists = True
-            except:
-                pass
+            except: pass
 
             if exists:
                 limit = 130 if prefix == "GD" else 35
                 found_sets.append({"code": set_code, "limit": limit})
-                set_miss_streak = 0 # Reset streak on success
+                set_miss_streak = 0
             else:
                 set_miss_streak += 1
-                # STOP checking this prefix after 2 failures (e.g., ST07, ST08 missing -> Stop)
-                if set_miss_streak >= 2:
-                    break 
+                if set_miss_streak >= 2: break 
         print(" Done.")
                 
     if not found_sets:
-        print("   ⚠️ No sets found. Using defaults.")
-        return [
-            {"code": "ST01", "limit": 25}, {"code": "GD01", "limit": 105}, {"code": "GD02", "limit": 105}
-        ]
+        return [{"code": "ST01", "limit": 25}, {"code": "GD01", "limit": 105}, {"code": "GD02", "limit": 105}]
     return found_sets
 
 def scrape_card(card_id):
     url = DETAIL_URL_TEMPLATE.format(card_id)
     try:
         resp = requests.get(url, headers=HEADERS, timeout=5)
-        
-        # FIX: Explicitly fail if site redirects to card list (Soft 404)
-        if resp.status_code != 200 or "cardlist" in resp.url: 
-            return None 
-            
+        if resp.status_code != 200 or "cardlist" in resp.url: return None 
         soup = BeautifulSoup(resp.content, "html.parser")
         
         name_tag = soup.select_one(".cardName, h1")
@@ -126,10 +115,11 @@ def scrape_card(card_id):
         traits_tag = soup.select_one(".characteristic")
         traits = traits_tag.text.strip() if traits_tag else ""
 
+        # --- IMAGE UPLOAD ---
         official_img_url = IMAGE_URL_TEMPLATE.format(card_id)
         final_image_url = upload_image_to_cloudinary(official_img_url, card_id)
 
-        print(f"   ✅ Scraped New: {card_id}")
+        print(f"   ✅ Scraped & Uploaded: {card_id}")
 
         return {
             "cardNo": card_id,
@@ -171,11 +161,10 @@ def run_update():
         except:
             print("   ⚠️ Error reading existing JSON. Starting fresh.")
     
-    # 2. DISCOVER
     sets = discover_sets()
     final_list = []
     
-    print(f"\n--- STARTING INCREMENTAL SCRAPE ---")
+    print(f"\n--- STARTING SCRAPE (WITH IMAGE REPAIR) ---")
     
     for set_info in sets:
         code = set_info['code']
@@ -183,22 +172,53 @@ def run_update():
         print(f"\nProcessing Set: {code}...")
         
         miss_streak = 0
-        max_misses = 2  # Cards stop after 2 failures
+        max_misses = 2 
         
         for i in range(1, limit + 1):
             card_id = f"{code}-{i:03d}"
             
-            # SKIP LOGIC
+            # --- INTELLIGENT CHECK ---
             if card_id in existing_cards:
-                final_list.append(existing_cards[card_id])
-                miss_streak = 0 
-                continue
+                card = existing_cards[card_id]
+                
+                # Check for Cloudinary presence
+                current_img = card.get('image', '')
+                is_cloudinary = 'cloudinary.com' in current_img
+                
+                if is_cloudinary:
+                    # Data + Image Good. Skip completely.
+                    final_list.append(card)
+                    miss_streak = 0 
+                    continue
+                else:
+                    # Data exists, but image is missing/wrong.
+                    # ONLY upload image, do NOT re-scrape stats.
+                    print(f"   🔧 Repairing Image for {card_id}...")
+                    
+                    official_url = IMAGE_URL_TEMPLATE.format(card_id)
+                    new_cloud_url = upload_image_to_cloudinary(official_url, card_id)
+                    
+                    # Update local record immediately
+                    card['image'] = new_cloud_url
+                    
+                    # Also update image_high_res in metadata if it exists
+                    if 'metadata' in card and isinstance(card['metadata'], str):
+                        try:
+                            meta_obj = json.loads(card['metadata'])
+                            meta_obj['image_high_res'] = new_cloud_url
+                            card['metadata'] = json.dumps(meta_obj)
+                        except: pass
 
-            # CHECK STREAK BEFORE REQUEST
+                    final_list.append(card)
+                    miss_streak = 0
+                    continue # Skip to next card
+
+            # --- CHECK STREAK ---
             if miss_streak >= max_misses:
                 print(f"   Stopping {code} at {i-1} (End of Set Detected)")
                 break
 
+            # --- FULL SCRAPE (New Card) ---
             card_data = scrape_card(card_id)
             
             if card_data:
@@ -207,7 +227,8 @@ def run_update():
                 miss_streak = 0
             else:
                 miss_streak += 1
-                print(f"   . {card_id} not found (Streak: {miss_streak})")
+                if miss_streak <= max_misses:
+                    print(f"   . {card_id} not found")
             
             time.sleep(0.1) 
 
