@@ -6,6 +6,7 @@ import time
 import datetime
 import cloudinary
 import cloudinary.uploader
+import cloudinary.api
 import re
 
 # --- CONFIGURATION ---
@@ -27,9 +28,12 @@ HEADERS = {
 
 def upload_image_to_cloudinary(image_url, public_id):
     try:
-        # Check if exists (Optional optimization)
-        # return cloudinary.api.resource(f"gundam_cards/{public_id}")['secure_url']
-        
+        try:
+            res = cloudinary.api.resource(f"gundam_cards/{public_id}")
+            return res['secure_url'] 
+        except cloudinary.exceptions.NotFound:
+            pass 
+
         result = cloudinary.uploader.upload(
             image_url,
             public_id=f"gundam_cards/{public_id}",
@@ -38,50 +42,46 @@ def upload_image_to_cloudinary(image_url, public_id):
         )
         return result['secure_url']
     except Exception as e:
-        print(f"   ❌ Cloudinary Upload Error ({public_id}): {e}")
+        print(f"   ❌ Cloudinary Error ({public_id}): {e}")
         return image_url
 
 def discover_sets():
     """
-    Brute-force checks for sets by probing the first card (e.g., ST01-001).
-    If ST01-001 exists, we assume the set ST01 exists.
+    Probes sets sequentially (ST01, ST02...). 
+    STOPS immediately if a set is missing.
     """
-    print("🔍 Brute-forcing set discovery...")
+    print("🔍 Probing for sets...")
     found_sets = []
     
-    # Prefixes to check
     prefixes = ["ST", "GD", "PR", "UT"] 
     
     for prefix in prefixes:
-        # Check numbers 01 through 15 (Increase this limit in the future)
-        for i in range(1, 15):
-            set_code = f"{prefix}{i:02d}" # e.g., ST01
+        print(f"   Checking {prefix} series...", end="")
+        for i in range(1, 20): 
+            set_code = f"{prefix}{i:02d}" 
             test_card = f"{set_code}-001"
             url = DETAIL_URL_TEMPLATE.format(test_card)
             
+            exists = False
             try:
-                # We check the detail page for the first card of the set
                 resp = requests.get(url, headers=HEADERS, timeout=3)
-                
-                # Check if it redirected to the main list (Soft 404) or stayed on detail
-                # And ensure the page has a valid title
                 if resp.status_code == 200 and "cardlist" not in resp.url:
                     soup = BeautifulSoup(resp.content, "html.parser")
                     if soup.select_one(".cardName, h1"):
-                        # Set Exists!
-                        limit = 130 if prefix == "GD" else 35
-                        found_sets.append({"code": set_code, "limit": limit})
-                        print(f"   ✅ Found Set: {set_code}")
-                    else:
-                        # Empty page means set likely doesn't exist yet
-                        break
-                else:
-                    break
+                        exists = True
             except:
-                break
+                pass
+
+            if exists:
+                limit = 130 if prefix == "GD" else 35
+                found_sets.append({"code": set_code, "limit": limit})
+            else:
+                # If ST07 fails, stop checking ST prefix entirely.
+                break 
+        print(" Done.")
                 
     if not found_sets:
-        print("   ⚠️ No sets found via probing. Using defaults.")
+        print("   ⚠️ No sets found. Using defaults.")
         return [
             {"code": "ST01", "limit": 25}, {"code": "GD01", "limit": 105}, {"code": "GD02", "limit": 105}
         ]
@@ -90,26 +90,21 @@ def discover_sets():
 
 def scrape_card(card_id):
     url = DETAIL_URL_TEMPLATE.format(card_id)
-    
     try:
         resp = requests.get(url, headers=HEADERS, timeout=5)
         if resp.status_code != 200: return None 
-            
         soup = BeautifulSoup(resp.content, "html.parser")
         
         name_tag = soup.select_one(".cardName, h1")
         if not name_tag: return None
         name = name_tag.text.strip()
 
-        # STATS PARSING
         stats = {"level": "-", "cost": "-", "hp": "-", "ap": "-", "rarity": "-", "color": "N/A", "type": "UNIT"}
-        
         for dt in soup.find_all("dt"):
             label = dt.text.strip().lower()
             val_tag = dt.find_next_sibling("dd")
             if not val_tag: continue
             val = val_tag.text.strip()
-            
             if "lv" in label: stats["level"] = val
             elif "cost" in label: stats["cost"] = val
             elif "hp" in label: stats["hp"] = val
@@ -120,15 +115,13 @@ def scrape_card(card_id):
 
         text_tag = soup.select_one(".text")
         effect_text = text_tag.text.strip().replace("<br>", "\n") if text_tag else ""
-        
         traits_tag = soup.select_one(".characteristic")
         traits = traits_tag.text.strip() if traits_tag else ""
 
-        # IMAGE HANDLING
         official_img_url = IMAGE_URL_TEMPLATE.format(card_id)
         final_image_url = upload_image_to_cloudinary(official_img_url, card_id)
 
-        print(f"   ✅ {card_id} | {name}")
+        print(f"   ✅ Scraped New: {card_id}")
 
         return {
             "cardNo": card_id,
@@ -153,16 +146,28 @@ def scrape_card(card_id):
             }),
             "last_updated": str(datetime.datetime.now())
         }
-
     except Exception as e:
         print(f"   ❌ Error {card_id}: {e}")
         return None
 
 def run_update():
-    sets = discover_sets()
-    all_cards = []
+    # 1. LOAD EXISTING
+    existing_cards = {}
+    if os.path.exists(JSON_FILE):
+        print(f"📂 Loading existing {JSON_FILE}...")
+        try:
+            with open(JSON_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                for c in data:
+                    existing_cards[c['cardNo']] = c
+        except:
+            print("   ⚠️ Error reading existing JSON. Starting fresh.")
     
-    print(f"\n--- STARTING SCRAPE ---")
+    # 2. DISCOVER
+    sets = discover_sets()
+    final_list = []
+    
+    print(f"\n--- STARTING INCREMENTAL SCRAPE ---")
     
     for set_info in sets:
         code = set_info['code']
@@ -170,27 +175,37 @@ def run_update():
         print(f"\nProcessing Set: {code}...")
         
         miss_streak = 0
+        # UPDATED: Max failures set to 2
+        max_misses = 2 
+        
         for i in range(1, limit + 1):
             card_id = f"{code}-{i:03d}"
             
-            if miss_streak >= 5:
-                print(f"   Stopping {code} at {i-5} (End of Set)")
+            # SKIP LOGIC
+            if card_id in existing_cards:
+                final_list.append(existing_cards[card_id])
+                miss_streak = 0 
+                continue
+
+            if miss_streak >= max_misses:
+                print(f"   Stopping {code} at {i-max_misses} (End of Set)")
                 break
 
             card_data = scrape_card(card_id)
             
             if card_data:
-                all_cards.append(card_data)
+                final_list.append(card_data)
+                existing_cards[card_id] = card_data 
                 miss_streak = 0
             else:
                 miss_streak += 1
             
             time.sleep(0.1) 
 
-    if len(all_cards) > 0:
-        print(f"\nSaving {len(all_cards)} cards to {JSON_FILE}...")
+    if len(final_list) > 0:
+        print(f"\nSaving {len(final_list)} cards to {JSON_FILE}...")
         with open(JSON_FILE, 'w', encoding='utf-8') as f:
-            json.dump(all_cards, f, indent=2, ensure_ascii=False)
+            json.dump(final_list, f, indent=2, ensure_ascii=False)
         print("Done.")
     else:
         print("❌ No cards found.")
