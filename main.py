@@ -47,16 +47,17 @@ def upload_image_to_cloudinary(image_url, public_id):
 
 def discover_sets():
     """
-    Probes sets sequentially (ST01, ST02...). 
-    STOPS immediately if a set is missing.
+    Probes sets sequentially.
+    STOPS only after 2 consecutive failures.
     """
     print("🔍 Probing for sets...")
     found_sets = []
-    
     prefixes = ["ST", "GD", "PR", "UT"] 
     
     for prefix in prefixes:
         print(f"   Checking {prefix} series...", end="")
+        set_miss_streak = 0 # Track missing sets
+        
         for i in range(1, 20): 
             set_code = f"{prefix}{i:02d}" 
             test_card = f"{set_code}-001"
@@ -65,6 +66,7 @@ def discover_sets():
             exists = False
             try:
                 resp = requests.get(url, headers=HEADERS, timeout=3)
+                # FIX: Check if it redirected to the main list (Soft 404)
                 if resp.status_code == 200 and "cardlist" not in resp.url:
                     soup = BeautifulSoup(resp.content, "html.parser")
                     if soup.select_one(".cardName, h1"):
@@ -75,9 +77,12 @@ def discover_sets():
             if exists:
                 limit = 130 if prefix == "GD" else 35
                 found_sets.append({"code": set_code, "limit": limit})
+                set_miss_streak = 0 # Reset streak on success
             else:
-                # If ST07 fails, stop checking ST prefix entirely.
-                break 
+                set_miss_streak += 1
+                # STOP checking this prefix after 2 failures (e.g., ST07, ST08 missing -> Stop)
+                if set_miss_streak >= 2:
+                    break 
         print(" Done.")
                 
     if not found_sets:
@@ -85,14 +90,17 @@ def discover_sets():
         return [
             {"code": "ST01", "limit": 25}, {"code": "GD01", "limit": 105}, {"code": "GD02", "limit": 105}
         ]
-        
     return found_sets
 
 def scrape_card(card_id):
     url = DETAIL_URL_TEMPLATE.format(card_id)
     try:
         resp = requests.get(url, headers=HEADERS, timeout=5)
-        if resp.status_code != 200: return None 
+        
+        # FIX: Explicitly fail if site redirects to card list (Soft 404)
+        if resp.status_code != 200 or "cardlist" in resp.url: 
+            return None 
+            
         soup = BeautifulSoup(resp.content, "html.parser")
         
         name_tag = soup.select_one(".cardName, h1")
@@ -175,8 +183,7 @@ def run_update():
         print(f"\nProcessing Set: {code}...")
         
         miss_streak = 0
-        # UPDATED: Max failures set to 2
-        max_misses = 2 
+        max_misses = 2  # Cards stop after 2 failures
         
         for i in range(1, limit + 1):
             card_id = f"{code}-{i:03d}"
@@ -187,8 +194,9 @@ def run_update():
                 miss_streak = 0 
                 continue
 
+            # CHECK STREAK BEFORE REQUEST
             if miss_streak >= max_misses:
-                print(f"   Stopping {code} at {i-max_misses} (End of Set)")
+                print(f"   Stopping {code} at {i-1} (End of Set Detected)")
                 break
 
             card_data = scrape_card(card_id)
@@ -199,6 +207,7 @@ def run_update():
                 miss_streak = 0
             else:
                 miss_streak += 1
+                print(f"   . {card_id} not found (Streak: {miss_streak})")
             
             time.sleep(0.1) 
 
