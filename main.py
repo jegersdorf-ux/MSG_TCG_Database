@@ -12,7 +12,7 @@ import re
 # --- CONFIGURATION ---
 DETAIL_URL_TEMPLATE = "https://www.gundam-gcg.com/en/cards/detail.php?detailSearch={}"
 IMAGE_URL_TEMPLATE = "https://www.gundam-gcg.com/en/images/cards/card/{}.webp?251120"
-JSON_FILE = "data.json" 
+JSON_FILE = "cards.json" 
 
 # Cloudinary Setup
 cloudinary.config(
@@ -279,3 +279,4 @@ def run_update():
 
 if __name__ == "__main__":
     run_update()
+
