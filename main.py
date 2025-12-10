@@ -9,12 +9,8 @@ import cloudinary.uploader
 import re
 
 # --- CONFIGURATION ---
-# Official Site URLs
-SEARCH_PAGE_URL = "https://www.gundam-gcg.com/en/cards/"
 DETAIL_URL_TEMPLATE = "https://www.gundam-gcg.com/en/cards/detail.php?detailSearch={}"
-# High-Res Image Pattern (Verified)
 IMAGE_URL_TEMPLATE = "https://www.gundam-gcg.com/en/images/cards/card/{}.webp?251120"
-
 JSON_FILE = "data.json" 
 
 # Cloudinary Setup
@@ -25,18 +21,15 @@ cloudinary.config(
   secure = True
 )
 
-# Headers to mimic a browser
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
 def upload_image_to_cloudinary(image_url, public_id):
-    """
-    Uploads an image URL directly to Cloudinary.
-    """
     try:
-        # Optimization: Cloudinary can fetch remote URLs directly.
-        # We don't need to download to a temp file first.
+        # Check if exists (Optional optimization)
+        # return cloudinary.api.resource(f"gundam_cards/{public_id}")['secure_url']
+        
         result = cloudinary.uploader.upload(
             image_url,
             public_id=f"gundam_cards/{public_id}",
@@ -45,59 +38,72 @@ def upload_image_to_cloudinary(image_url, public_id):
         )
         return result['secure_url']
     except Exception as e:
-        print(f"   ❌ Cloudinary Error ({public_id}): {e}")
-        # Fallback: Return original URL if upload fails so app still has an image
+        print(f"   ❌ Cloudinary Upload Error ({public_id}): {e}")
         return image_url
 
 def discover_sets():
     """
-    Scrapes the search page to find all current Set Codes (GD01, ST01, etc.)
+    Brute-force checks for sets by probing the first card (e.g., ST01-001).
+    If ST01-001 exists, we assume the set ST01 exists.
     """
-    print("🔍 Auto-discovering sets from official site...")
-    sets = []
-    try:
-        resp = requests.get(SEARCH_PAGE_URL, headers=HEADERS, timeout=10)
-        soup = BeautifulSoup(resp.content, "html.parser")
-        
-        seen = set()
-        # Find options in the Product dropdown
-        for option in soup.select("select option"):
-            text = option.text.strip()
-            # Extract [GD01] pattern
-            match = re.search(r"\[([A-Z]{2}\d{2})\]", text)
-            if match:
-                code = match.group(1)
-                if code not in seen:
-                    # Estimate count: Starters ~30, Boosters ~130
-                    limit = 130 if "GD" in code else 35
-                    sets.append({"code": code, "limit": limit})
-                    seen.add(code)
-                    print(f"   Found Set: {code}")
-    except Exception as e:
-        print(f"   ⚠️ Discovery failed: {e}. Using defaults.")
-        return [{"code": "ST01", "limit": 20}, {"code": "GD01", "limit": 105}]
+    print("🔍 Brute-forcing set discovery...")
+    found_sets = []
     
-    return sets
+    # Prefixes to check
+    prefixes = ["ST", "GD", "PR", "UT"] 
+    
+    for prefix in prefixes:
+        # Check numbers 01 through 15 (Increase this limit in the future)
+        for i in range(1, 15):
+            set_code = f"{prefix}{i:02d}" # e.g., ST01
+            test_card = f"{set_code}-001"
+            url = DETAIL_URL_TEMPLATE.format(test_card)
+            
+            try:
+                # We check the detail page for the first card of the set
+                resp = requests.get(url, headers=HEADERS, timeout=3)
+                
+                # Check if it redirected to the main list (Soft 404) or stayed on detail
+                # And ensure the page has a valid title
+                if resp.status_code == 200 and "cardlist" not in resp.url:
+                    soup = BeautifulSoup(resp.content, "html.parser")
+                    if soup.select_one(".cardName, h1"):
+                        # Set Exists!
+                        limit = 130 if prefix == "GD" else 35
+                        found_sets.append({"code": set_code, "limit": limit})
+                        print(f"   ✅ Found Set: {set_code}")
+                    else:
+                        # Empty page means set likely doesn't exist yet
+                        break
+                else:
+                    break
+            except:
+                break
+                
+    if not found_sets:
+        print("   ⚠️ No sets found via probing. Using defaults.")
+        return [
+            {"code": "ST01", "limit": 25}, {"code": "GD01", "limit": 105}, {"code": "GD02", "limit": 105}
+        ]
+        
+    return found_sets
 
 def scrape_card(card_id):
     url = DETAIL_URL_TEMPLATE.format(card_id)
     
     try:
         resp = requests.get(url, headers=HEADERS, timeout=5)
-        # If redirect or 404, card doesn't exist
         if resp.status_code != 200: return None 
             
         soup = BeautifulSoup(resp.content, "html.parser")
         
-        # VALIDATION: Check if page has a name title
         name_tag = soup.select_one(".cardName, h1")
         if not name_tag: return None
         name = name_tag.text.strip()
 
-        # STATS PARSING (Level, Cost, HP, AP, Rarity)
+        # STATS PARSING
         stats = {"level": "-", "cost": "-", "hp": "-", "ap": "-", "rarity": "-", "color": "N/A", "type": "UNIT"}
         
-        # Iterate through definition lists <dl><dt>Label</dt><dd>Value</dd></dl>
         for dt in soup.find_all("dt"):
             label = dt.text.strip().lower()
             val_tag = dt.find_next_sibling("dd")
@@ -112,7 +118,6 @@ def scrape_card(card_id):
             elif "color" in label: stats["color"] = val
             elif "type" in label: stats["type"] = val
 
-        # TEXT & TRAITS
         text_tag = soup.select_one(".text")
         effect_text = text_tag.text.strip().replace("<br>", "\n") if text_tag else ""
         
@@ -120,15 +125,11 @@ def scrape_card(card_id):
         traits = traits_tag.text.strip() if traits_tag else ""
 
         # IMAGE HANDLING
-        # 1. Construct Official High-Res URL
         official_img_url = IMAGE_URL_TEMPLATE.format(card_id)
-        
-        # 2. Upload to Cloudinary
         final_image_url = upload_image_to_cloudinary(official_img_url, card_id)
 
         print(f"   ✅ {card_id} | {name}")
 
-        # BUILD FINAL OBJECT
         return {
             "cardNo": card_id,
             "originalId": card_id,
@@ -141,9 +142,6 @@ def scrape_card(card_id):
             "effectData": effect_text,
             "categoryData": stats["type"],
             "image": final_image_url,
-            
-            # STORE EXTRA STATS IN METADATA STRING
-            # This is what your app parses to find Level and HP
             "metadata": json.dumps({ 
                 "level": stats["level"],
                 "hp": stats["hp"],
@@ -151,7 +149,7 @@ def scrape_card(card_id):
                 "atk": stats["ap"],
                 "trait": traits,
                 "type": stats["type"],
-                "variants": [] # Placeholder for now
+                "variants": [] 
             }),
             "last_updated": str(datetime.datetime.now())
         }
@@ -175,7 +173,6 @@ def run_update():
         for i in range(1, limit + 1):
             card_id = f"{code}-{i:03d}"
             
-            # Stop searching this set if 5 cards in a row are missing
             if miss_streak >= 5:
                 print(f"   Stopping {code} at {i-5} (End of Set)")
                 break
@@ -188,9 +185,8 @@ def run_update():
             else:
                 miss_streak += 1
             
-            time.sleep(0.1) # Be polite to server
+            time.sleep(0.1) 
 
-    # SAVE TO JSON
     if len(all_cards) > 0:
         print(f"\nSaving {len(all_cards)} cards to {JSON_FILE}...")
         with open(JSON_FILE, 'w', encoding='utf-8') as f:
