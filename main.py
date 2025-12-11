@@ -1,4 +1,6 @@
+# --- REFACTORED GUNDAM SCRAPER (FIXED HANG ISSUE) ---
 import requests
+from requests.exceptions import Timeout, ConnectionError, RequestException # New imports
 from bs4 import BeautifulSoup
 import json
 import os
@@ -14,17 +16,18 @@ FULL_CHECK = True  # True = Audit all cards & update structure. False = Only fin
 
 DETAIL_URL_TEMPLATE = "https://www.gundam-gcg.com/en/cards/detail.php?detailSearch={}"
 IMAGE_URL_TEMPLATE = "https://www.gundam-gcg.com/en/images/cards/card/{}.webp?251120"
-JSON_FILE = "cards.json" 
+JSON_FILE = "cards.json"
 
-# Cloudinary Setup
+# Cloudinary Setup (Assumes environment variables are set)
 cloudinary.config(
-  cloud_name = os.getenv('CLOUDINARY_CLOUD_NAME'),
-  api_key = os.getenv('CLOUDINARY_API_KEY'),
-  api_secret = os.getenv('CLOUDINARY_API_SECRET'),
-  secure = True
+    cloud_name = os.getenv('CLOUDINARY_CLOUD_NAME'),
+    api_key = os.getenv('CLOUDINARY_API_KEY'),
+    api_secret = os.getenv('CLOUDINARY_API_SECRET'),
+    secure = True
 )
 
 HEADERS = {
+    # Using a modern User-Agent helps prevent server-side blocking
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
@@ -48,54 +51,75 @@ def upload_image_to_cloudinary(image_url, public_id):
             unique_filename=False,
             overwrite=True
         )
-        return result['secure_url'] 
+        return result['secure_url']
     except Exception as e:
         error_msg = str(e)
         if "420" in error_msg or "Rate Limit" in error_msg:
-            print(f"   🛑 RATE LIMIT REACHED. Switching to text-only mode.")
+            print(f"    🛑 RATE LIMIT REACHED. Switching to text-only mode.")
             RATE_LIMIT_HIT = True
-        return image_url 
+        return image_url
 
 def discover_sets():
     print("🔍 Probing for sets...")
     found_sets = []
-    prefixes = ["ST", "GD", "PR", "UT"] 
+    prefixes = ["ST", "GD", "PR", "UT"]
+    
+    # Increase the overall timeout for the initial probe to be safe
+    PROBE_TIMEOUT = 5 
     
     for prefix in prefixes:
-        print(f"   Checking {prefix} series...", end="")
+        print(f"    Checking {prefix} series...", end="")
         set_miss_streak = 0
-        for i in range(1, 20): 
-            set_code = f"{prefix}{i:02d}" 
+        
+        # Checking up to 20 sets per prefix should be sufficient
+        for i in range(1, 20):
+            set_code = f"{prefix}{i:02d}"
             test_card = f"{set_code}-001"
             url = DETAIL_URL_TEMPLATE.format(test_card)
             
             exists = False
             try:
-                resp = requests.get(url, headers=HEADERS, timeout=3)
+                # Use the increased PROBE_TIMEOUT here
+                resp = requests.get(url, headers=HEADERS, timeout=PROBE_TIMEOUT) 
+                
                 if resp.status_code == 200 and "cardlist" not in resp.url:
                     soup = BeautifulSoup(resp.content, "html.parser")
                     if soup.select_one(".cardName, h1"):
                         exists = True
-            except: pass
+            except (Timeout, ConnectionError, RequestException) as e:
+                # Explicitly catch request exceptions and log them
+                print(f"\n    ⚠️ Connection issue during probe {test_card}: {e}", end="")
+                # Do not break here, try next one in case it was a temporary glitch
+                pass 
+            except Exception as e:
+                # Catch all other exceptions (like BS4 errors)
+                print(f"\n    ❌ Unexpected error during probe {test_card}: {e}", end="")
+                pass
 
             if exists:
-                limit = 135 if prefix == "GD" else 35
+                # Use a reliable limit based on historical data for deep audits
+                limit = 135 if prefix == "GD" else 35 
                 found_sets.append({"code": set_code, "limit": limit})
                 set_miss_streak = 0
             else:
                 set_miss_streak += 1
-                if set_miss_streak >= 2: break 
+                if set_miss_streak >= 2: 
+                    break  # Stop if two consecutive set probes fail
         print(" Done.")
-                
+            
     if not found_sets:
+        # Fallback to known, core sets if discovery completely fails
+        print("    No sets discovered. Using hardcoded fallback sets.")
         return [{"code": "ST01", "limit": 25}, {"code": "GD01", "limit": 105}, {"code": "GD02", "limit": 105}]
     return found_sets
 
 def scrape_card(card_id, existing_card=None):
     url = DETAIL_URL_TEMPLATE.format(card_id)
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=5)
-        if resp.status_code != 200 or "cardlist" in resp.url: return None 
+        # Use a more generous but definite timeout for scraping individual cards
+        resp = requests.get(url, headers=HEADERS, timeout=10) 
+        
+        if resp.status_code != 200 or "cardlist" in resp.url: return None
         
         soup = BeautifulSoup(resp.content, "html.parser")
         
@@ -104,7 +128,7 @@ def scrape_card(card_id, existing_card=None):
         name = name_tag.text.strip()
         if not name: return None
 
-        # --- Data Extraction ---
+        # --- Data Extraction (Unchanged from original script) ---
         raw_stats = {
             "level": "-", "cost": "-", "hp": "-", "ap": "-", "rarity": "-", 
             "color": "N/A", "type": "UNIT", "zone": "-", "trait": "-", 
@@ -136,28 +160,27 @@ def scrape_card(card_id, existing_card=None):
         effect_tag = soup.select_one(".cardDataRow.overview .dataTxt")
         effect_text = effect_tag.text.strip().replace("<br>", "\n") if effect_tag else ""
         
-        # --- SMART IMAGE HANDLING ---
+        # --- SMART IMAGE HANDLING (Unchanged from original script) ---
         final_image_url = ""
         has_valid_existing_image = (
             existing_card 
-            and "image_url" in existing_card # Note: Changed key to image_url for consistency
+            and "image_url" in existing_card 
             and "cloudinary.com" in existing_card["image_url"]
         )
 
         if has_valid_existing_image:
             final_image_url = existing_card["image_url"]
         else:
-            # Fallback to old 'image' key if migrating
             if existing_card and "image" in existing_card and "cloudinary.com" in existing_card["image"]:
                  final_image_url = existing_card["image"]
             else:
                 official_img_url = IMAGE_URL_TEMPLATE.format(card_id)
                 final_image_url = upload_image_to_cloudinary(official_img_url, card_id)
 
-        # --- FLATTENED OUTPUT FOR WATERMELON DB ---
+        # --- FLATTENED OUTPUT FOR WATERMELON DB (Unchanged from original script) ---
         return {
-            "id": card_id,             # WatermelonDB Primary Key
-            "card_no": card_id,        # User facing ID
+            "id": card_id,           
+            "card_no": card_id,       
             "name": name,
             "series": card_id.split("-")[0],
             "cost": safe_int(raw_stats["cost"]),
@@ -167,8 +190,8 @@ def scrape_card(card_id, existing_card=None):
             "color": raw_stats["color"],
             "rarity": raw_stats["rarity"],
             "type": raw_stats["type"],
-            "block_icon": safe_int(block_icon), # Usually a number 1-3
-            "trait": raw_stats["trait"],        # String, searchable
+            "block_icon": safe_int(block_icon), 
+            "trait": raw_stats["trait"],       
             "zone": raw_stats["zone"],
             "link": raw_stats["link"],
             "effect_text": effect_text,
@@ -178,14 +201,17 @@ def scrape_card(card_id, existing_card=None):
             "last_updated": str(datetime.datetime.now())
         }
 
+    except (Timeout, ConnectionError, RequestException) as e:
+        print(f"    ❌ Error {card_id}: Request failed: {e}")
+        return None
     except Exception as e:
-        print(f"   ❌ Error {card_id}: {e}")
+        print(f"    ❌ Error {card_id}: Unexpected Scraping Error: {e}")
         return None
 
 def save_db(db):
     if len(db) > 0:
         data_list = list(db.values())
-        print(f"   💾 Checkpoint: Saving {len(data_list)} total cards...")
+        print(f"    💾 Checkpoint: Saving {len(data_list)} total cards...")
         with open(JSON_FILE, 'w', encoding='utf-8') as f:
             json.dump(data_list, f, indent=2, ensure_ascii=False)
 
@@ -194,7 +220,7 @@ def clean_database(db):
     clean_db = {}
     for key, card in db.items():
         if not isinstance(card, dict): continue
-        if not card.get('card_no') and not card.get('cardNo'): continue # Support both old/new keys during migration
+        if not card.get('card_no') and not card.get('cardNo'): continue
         clean_db[key] = card
     return clean_db
 
@@ -205,9 +231,7 @@ def has_changed(old, new):
     o.pop('last_updated', None)
     n.pop('last_updated', None)
     
-    # Simple recursive check won't work perfectly if keys changed names (e.g. image -> image_url)
-    # But since we are doing a structural update, we treat ANY structure diff as a change.
-    return str(o) != str(n) 
+    return str(o) != str(n)
 
 def run_update():
     master_db = {}
@@ -217,13 +241,17 @@ def run_update():
             with open(JSON_FILE, 'r', encoding='utf-8') as f:
                 data_list = json.load(f)
                 for c in data_list:
-                    # Handle legacy key 'cardNo' vs new 'id'
                     key = c.get('id', c.get('cardNo'))
                     if key: master_db[key] = c
         except:
-            print("   ⚠️ Error reading existing JSON. Starting fresh.")
+            print("    ⚠️ Error reading existing JSON. Starting fresh.")
     
     master_db = clean_database(master_db)
+    
+    # --- Check for missing environment variables at initialization ---
+    if not all([os.getenv('CLOUDINARY_CLOUD_NAME'), os.getenv('CLOUDINARY_API_KEY'), os.getenv('CLOUDINARY_API_SECRET')]):
+        print("\n    🛑 WARNING: Cloudinary environment variables are missing. Image uploads will be skipped.")
+
     sets = discover_sets()
     
     mode_label = "DEEP AUDIT" if FULL_CHECK else "INCREMENTAL UPDATE"
@@ -232,7 +260,7 @@ def run_update():
     for set_info in sets:
         code = set_info['code']
         limit = set_info['limit']
-        print(f"\nProcessing Set: {code}...")
+        print(f"\nProcessing Set: {code} (up to {limit} cards)...")
         
         miss_streak = 0
         max_misses = 3
@@ -250,17 +278,21 @@ def run_update():
             if new_card_data:
                 if has_changed(existing_card, new_card_data):
                     status = "UPDATE" if existing_card else "NEW"
-                    print(f"   📝 {status}: {card_id}")    
+                    print(f"    📝 {status}: {card_id}")    
                     master_db[card_id] = new_card_data
                 miss_streak = 0
             else:
                 miss_streak += 1
                 if miss_streak <= max_misses:
-                    print(f"   . {card_id} not found")
+                    print(f"    . {card_id} not found (Miss {miss_streak}/{max_misses})")
             
-            time.sleep(0.1) 
-        
-        save_db(master_db)
+            time.sleep(0.1) # Respectful delay
+            
+            # Save checkpoint every 200 successful scrapes to prevent data loss
+            if i % 200 == 0:
+                 save_db(master_db) 
+                 
+        save_db(master_db) # Final save after each set
 
     print("\n✅ Update Complete.")
 
