@@ -1,6 +1,5 @@
-# --- REFACTORED GUNDAM SCRAPER (FIXED HANG ISSUE) ---
 import requests
-from requests.exceptions import Timeout, ConnectionError, RequestException # New imports
+from requests.exceptions import Timeout, ConnectionError, RequestException
 from bs4 import BeautifulSoup
 import json
 import os
@@ -12,7 +11,7 @@ import cloudinary.api
 import re
 
 # --- CONFIGURATION ---
-FULL_CHECK = False  # True = Audit all cards & update structure. False = Only find new cards.
+FULL_CHECK = True  # True = Audit all cards & update structure. False = Only find new cards.
 
 DETAIL_URL_TEMPLATE = "https://www.gundam-gcg.com/en/cards/detail.php?detailSearch={}"
 IMAGE_URL_TEMPLATE = "https://www.gundam-gcg.com/en/images/cards/card/{}.webp?251120"
@@ -27,16 +26,16 @@ cloudinary.config(
 )
 
 HEADERS = {
-    # Using a modern User-Agent helps prevent server-side blocking
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
 RATE_LIMIT_HIT = False
 
 def safe_int(val):
-    """Converts string to int, returns 0 if invalid."""
+    """Converts string to int, returns 0 if invalid. Handles non-digit characters."""
     try:
-        return int(re.sub(r'\D', '', val)) # Remove non-digits like 'AP: 4000' -> 4000
+        # Remove non-digits (like 'HP: 4000' -> '4000') before converting
+        return int(re.sub(r'\D', '', val)) 
     except:
         return 0
 
@@ -57,21 +56,19 @@ def upload_image_to_cloudinary(image_url, public_id):
         if "420" in error_msg or "Rate Limit" in error_msg:
             print(f"    🛑 RATE LIMIT REACHED. Switching to text-only mode.")
             RATE_LIMIT_HIT = True
+        # If upload fails for any reason, return the original URL as a fallback
         return image_url
 
 def discover_sets():
     print("🔍 Probing for sets...")
     found_sets = []
     prefixes = ["ST", "GD", "PR", "UT"]
-    
-    # Increase the overall timeout for the initial probe to be safe
-    PROBE_TIMEOUT = 5 
+    PROBE_TIMEOUT = 5 # Set explicit timeout for connection attempt
     
     for prefix in prefixes:
         print(f"    Checking {prefix} series...", end="")
         set_miss_streak = 0
         
-        # Checking up to 20 sets per prefix should be sufficient
         for i in range(1, 20):
             set_code = f"{prefix}{i:02d}"
             test_card = f"{set_code}-001"
@@ -79,7 +76,6 @@ def discover_sets():
             
             exists = False
             try:
-                # Use the increased PROBE_TIMEOUT here
                 resp = requests.get(url, headers=HEADERS, timeout=PROBE_TIMEOUT) 
                 
                 if resp.status_code == 200 and "cardlist" not in resp.url:
@@ -87,17 +83,14 @@ def discover_sets():
                     if soup.select_one(".cardName, h1"):
                         exists = True
             except (Timeout, ConnectionError, RequestException) as e:
-                # Explicitly catch request exceptions and log them
                 print(f"\n    ⚠️ Connection issue during probe {test_card}: {e}", end="")
-                # Do not break here, try next one in case it was a temporary glitch
                 pass 
             except Exception as e:
-                # Catch all other exceptions (like BS4 errors)
                 print(f"\n    ❌ Unexpected error during probe {test_card}: {e}", end="")
                 pass
 
             if exists:
-                # Use a reliable limit based on historical data for deep audits
+                # Use a reliable limit for deep audits
                 limit = 135 if prefix == "GD" else 35 
                 found_sets.append({"code": set_code, "limit": limit})
                 set_miss_streak = 0
@@ -108,7 +101,6 @@ def discover_sets():
         print(" Done.")
             
     if not found_sets:
-        # Fallback to known, core sets if discovery completely fails
         print("    No sets discovered. Using hardcoded fallback sets.")
         return [{"code": "ST01", "limit": 25}, {"code": "GD01", "limit": 105}, {"code": "GD02", "limit": 105}]
     return found_sets
@@ -116,7 +108,7 @@ def discover_sets():
 def scrape_card(card_id, existing_card=None):
     url = DETAIL_URL_TEMPLATE.format(card_id)
     try:
-        # Use a more generous but definite timeout for scraping individual cards
+        # Use a defined timeout for individual scraping
         resp = requests.get(url, headers=HEADERS, timeout=10) 
         
         if resp.status_code != 200 or "cardlist" in resp.url: return None
@@ -128,7 +120,7 @@ def scrape_card(card_id, existing_card=None):
         name = name_tag.text.strip()
         if not name: return None
 
-        # --- Data Extraction (Unchanged from original script) ---
+        # --- Data Extraction ---
         raw_stats = {
             "level": "-", "cost": "-", "hp": "-", "ap": "-", "rarity": "-", 
             "color": "N/A", "type": "UNIT", "zone": "-", "trait": "-", 
@@ -160,7 +152,7 @@ def scrape_card(card_id, existing_card=None):
         effect_tag = soup.select_one(".cardDataRow.overview .dataTxt")
         effect_text = effect_tag.text.strip().replace("<br>", "\n") if effect_tag else ""
         
-        # --- SMART IMAGE HANDLING (Unchanged from original script) ---
+        # --- SMART IMAGE HANDLING ---
         final_image_url = ""
         has_valid_existing_image = (
             existing_card 
@@ -177,10 +169,10 @@ def scrape_card(card_id, existing_card=None):
                 official_img_url = IMAGE_URL_TEMPLATE.format(card_id)
                 final_image_url = upload_image_to_cloudinary(official_img_url, card_id)
 
-        # --- FLATTENED OUTPUT FOR WATERMELON DB (Unchanged from original script) ---
+        # --- FLATTENED OUTPUT FOR WATERMELON DB (CRITICAL FIX) ---
         return {
-            "id": card_id,           
-            "card_no": card_id,       
+            "id": card_id,           # REQUIRED: WatermelonDB Primary Key
+            "card_no": card_id,       # User facing ID
             "name": name,
             "series": card_id.split("-")[0],
             "cost": safe_int(raw_stats["cost"]),
@@ -196,7 +188,7 @@ def scrape_card(card_id, existing_card=None):
             "link": raw_stats["link"],
             "effect_text": effect_text,
             "source_title": raw_stats["source"],
-            "image_url": final_image_url,
+            "image_url": final_image_url, # Key corrected to image_url
             "release_pack": raw_stats["release"],
             "last_updated": str(datetime.datetime.now())
         }
@@ -220,7 +212,9 @@ def clean_database(db):
     clean_db = {}
     for key, card in db.items():
         if not isinstance(card, dict): continue
-        if not card.get('card_no') and not card.get('cardNo'): continue
+        # Use 'id' for the key now, supporting old keys for loading
+        key = card.get('id') or card.get('cardNo') 
+        if not key: continue
         clean_db[key] = card
     return clean_db
 
@@ -241,6 +235,7 @@ def run_update():
             with open(JSON_FILE, 'r', encoding='utf-8') as f:
                 data_list = json.load(f)
                 for c in data_list:
+                    # Look for new 'id' first, then fall back to legacy 'cardNo'
                     key = c.get('id', c.get('cardNo'))
                     if key: master_db[key] = c
         except:
@@ -248,7 +243,7 @@ def run_update():
     
     master_db = clean_database(master_db)
     
-    # --- Check for missing environment variables at initialization ---
+    # Check for missing environment variables at initialization
     if not all([os.getenv('CLOUDINARY_CLOUD_NAME'), os.getenv('CLOUDINARY_API_KEY'), os.getenv('CLOUDINARY_API_SECRET')]):
         print("\n    🛑 WARNING: Cloudinary environment variables are missing. Image uploads will be skipped.")
 
@@ -268,6 +263,7 @@ def run_update():
         for i in range(1, limit + 1):
             card_id = f"{code}-{i:03d}"
             
+            # Skip if incremental mode AND card exists
             if not FULL_CHECK and card_id in master_db:
                 miss_streak = 0
                 continue
@@ -288,7 +284,7 @@ def run_update():
             
             time.sleep(0.1) # Respectful delay
             
-            # Save checkpoint every 200 successful scrapes to prevent data loss
+            # Save checkpoint every 200 successful scrapes
             if i % 200 == 0:
                  save_db(master_db) 
                  
@@ -298,4 +294,3 @@ def run_update():
 
 if __name__ == "__main__":
     run_update()
-
