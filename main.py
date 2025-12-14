@@ -4,11 +4,10 @@ from bs4 import BeautifulSoup
 import json
 import os
 import time
-import datetime
+import re
 import cloudinary
 import cloudinary.uploader
 import cloudinary.api
-import re
 
 # --- CONFIGURATION ---
 FULL_CHECK = True  # True = Audit all cards. False = Only find new cards.
@@ -16,22 +15,20 @@ FULL_CHECK = True  # True = Audit all cards. False = Only find new cards.
 # Files
 JSON_FILE = "cards.json"
 DECKS_FILE = "decks.json"
+METADATA_FILE = "deck_metadata.json" # Stores names like "Red Comet"
+
+# Scanning Range for Strategy Pages
+# Currently ST01 starts at 004. We scan ahead to catch ST05/06.
+SCAN_START_ID = 4
+SCAN_END_ID = 25 
 
 # URL Templates
 DETAIL_URL_TEMPLATE = "https://www.gundam-gcg.com/en/cards/detail.php?detailSearch={}"
 IMAGE_URL_TEMPLATE = "https://www.gundam-gcg.com/en/images/cards/card/{}.webp?251120"
+STRATEGY_URL_TEMPLATE = "https://www.gundam-gcg.com/en/decks/deck-{:03d}.php"
+PRODUCT_URL_TEMPLATE = "https://www.gundam-gcg.com/en/products/{}.html"
 
-# DECK SOURCES: Map Deck Code -> Strategy Page URL
-DECK_SOURCES = {
-    "ST01": "https://www.gundam-gcg.com/en/decks/deck-004.php",
-    "ST02": "https://www.gundam-gcg.com/en/decks/deck-005.php",
-    "ST03": "https://www.gundam-gcg.com/en/decks/deck-006.php",
-    "ST04": "https://www.gundam-gcg.com/en/decks/deck-007.php",
-    # Add future decks here (e.g., ST05, ST06)
-}
-
-# ARCHITECTURAL NOTE: 
-# Add new set prefixes here to ensure they are discovered by the prober.
+# Known Set Prefixes for Card Discovery
 KNOWN_SET_PREFIXES = ["ST", "GD", "PR", "UT", "EXRP", "EXB", "EXR", "EXBP"]
 
 # Cloudinary Setup
@@ -60,22 +57,77 @@ def safe_int(val):
         return 0
 
 def has_changed(old, new):
-    """Generic diff checker for dicts."""
     if not old: return True
-    # For cards, we ignore timestamps. For decks, straight comparison is fine.
     o = old.copy()
     n = new.copy()
     o.pop('last_updated', None)
     n.pop('last_updated', None)
-    # Sort keys to ensure reliable string comparison
     return json.dumps(o, sort_keys=True) != json.dumps(n, sort_keys=True)
 
-# --- PHASE 1: DECK SCRAPING LOGIC ---
+# --- PHASE 1: DYNAMIC DECK DISCOVERY (THE HUNTER) ---
 
-def scrape_deck_strategy(url):
+def get_product_name(deck_code):
     """
-    Scrapes a strategy page for card counts using Regex.
-    Returns: { "ST01-001": 2, "ST01-002": 4 }
+    Fetches the marketing name from the Product Page.
+    e.g., ST01 -> "Starter Deck Earth Federation Force"
+    """
+    url = PRODUCT_URL_TEMPLATE.format(deck_code.lower())
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=5)
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.content, "html.parser")
+            # Usually in an H1 or a specific product title class
+            h1 = soup.select_one("h1.ttl, .productName, h1")
+            if h1:
+                return h1.text.strip()
+    except:
+        pass
+    return f"Starter Deck {deck_code}" # Fallback
+
+def hunt_decks():
+    """
+    Scans CMS IDs to find valid Strategy Pages.
+    Returns a dict: { "ST01": {"strategy_url": "...", "name": "..."} }
+    """
+    print(f"\n🕵️ Hunting for Decks (IDs {SCAN_START_ID}-{SCAN_END_ID})...")
+    found_decks = {}
+    
+    for i in range(SCAN_START_ID, SCAN_END_ID + 1):
+        url = STRATEGY_URL_TEMPLATE.format(i)
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=3)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.content, "html.parser")
+                title = soup.title.text.strip() if soup.title else ""
+                
+                # Regex to extract ST code (e.g., "ST01", "ST-01", "ST05")
+                # We look for "ST" followed immediately by digits
+                match = re.search(r'(ST\d+)', title, re.IGNORECASE)
+                
+                if match:
+                    code = match.group(1).upper()
+                    print(f"    ✅ HIT: Found {code} at ID {i:03d}")
+                    
+                    # Fetch pretty name from Product Page
+                    pretty_name = get_product_name(code)
+                    
+                    found_decks[code] = {
+                        "strategy_url": url,
+                        "name": pretty_name,
+                        "cms_id": i
+                    }
+                
+                # Polite delay between scans
+                time.sleep(0.2)
+        except Exception as e:
+            print(f"    ⚠️ Scan error at ID {i}: {e}")
+            
+    print(f"    ✨ Hunter found {len(found_decks)} decks.")
+    return found_decks
+
+def scrape_deck_counts(url):
+    """
+    Scrapes the card counts from the Strategy Page.
     """
     try:
         resp = requests.get(url, headers=HEADERS, timeout=10)
@@ -84,7 +136,6 @@ def scrape_deck_strategy(url):
         soup = BeautifulSoup(resp.content, "html.parser")
         text_content = soup.get_text()
 
-        # Regex: Looks for "2x CardName (ST01-001)"
         pattern = re.compile(r'(\d+)x\s+.*?\((ST\d+-\d+)\)')
         matches = pattern.findall(text_content)
         
@@ -93,69 +144,79 @@ def scrape_deck_strategy(url):
         deck_dict = {}
         for count, card_id in matches:
             deck_dict[card_id.strip()] = int(count)
-            
         return deck_dict
-    except Exception:
+    except:
         return None
 
 def sync_decks():
-    """
-    Manages the Deck DB. Follows the '3 Failures' and 'Update Only Changes' rules.
-    """
     print("\n--- PHASE 1: SYNCING DECKS ---")
     
-    # 1. Load Existing
+    # 1. Run the Hunter to build the source list
+    discovered_sources = hunt_decks()
+    
+    # 2. Load existing Deck Data
     master_decks = {}
+    master_metadata = {}
+    
     if os.path.exists(DECKS_FILE):
         try:
-            with open(DECKS_FILE, 'r', encoding='utf-8') as f:
-                master_decks = json.load(f)
-        except:
-            print("    ⚠️ Error reading decks.json. Starting fresh.")
-    
+            with open(DECKS_FILE, 'r') as f: master_decks = json.load(f)
+        except: pass
+        
+    if os.path.exists(METADATA_FILE):
+        try:
+            with open(METADATA_FILE, 'r') as f: master_metadata = json.load(f)
+        except: pass
+
+    # 3. Scrape Counts for each Discovered Deck
     updates_made = False
     
-    for deck_code, url in DECK_SOURCES.items():
-        print(f"    Processing {deck_code}...", end="")
+    for code, info in discovered_sources.items():
+        url = info['strategy_url']
+        name = info['name']
         
-        # Retry Logic (3 Failures Rule)
-        max_retries = 3
-        scraped_data = None
-        
-        for attempt in range(1, max_retries + 1):
-            scraped_data = scrape_deck_strategy(url)
-            if scraped_data:
-                break # Success
-            else:
-                if attempt < max_retries:
-                    time.sleep(1) # Brief cooldown
-                else:
-                    print(f" ❌ Failed after {max_retries} attempts. Skipping.")
-        
-        if not scraped_data:
-            continue
-            
-        # Diff Check (Update Only Changes)
-        existing_data = master_decks.get(deck_code)
-        if has_changed(existing_data, scraped_data):
-            status = "UPDATE" if existing_data else "NEW"
-            print(f" 📝 {status}")
-            master_decks[deck_code] = scraped_data
+        # Update Metadata if new/changed
+        if code not in master_metadata or master_metadata[code].get('name') != name:
+            master_metadata[code] = {
+                "name": name,
+                "strategy_url": url,
+                "product_url": PRODUCT_URL_TEMPLATE.format(code.lower())
+            }
             updates_made = True
-        else:
-            print(" ✅ No Changes")
             
-        time.sleep(0.5) # Be polite
+        # Scrape Card Counts
+        print(f"    Processing {code} list...", end="")
+        
+        # Check if we already have data to avoid re-scraping unchanged decks
+        if code in master_decks and not FULL_CHECK:
+             print(" Skipped (Cached)")
+             continue
 
+        # Retry Logic
+        scraped_data = None
+        for attempt in range(1, 4):
+            scraped_data = scrape_deck_counts(url)
+            if scraped_data: break
+            time.sleep(1)
+            
+        if scraped_data:
+            if has_changed(master_decks.get(code), scraped_data):
+                print(f" 📝 Updated Counts")
+                master_decks[code] = scraped_data
+                updates_made = True
+            else:
+                print(" ✅ No Changes")
+        else:
+            print(" ❌ Failed to scrape counts")
+            
     if updates_made:
-        print(f"    💾 Saving updated decks to {DECKS_FILE}...")
+        print(f"    💾 Saving {DECKS_FILE} and {METADATA_FILE}...")
         with open(DECKS_FILE, 'w', encoding='utf-8') as f:
             json.dump(master_decks, f, indent=2)
-    else:
-        print("    ✨ Decks are up to date.")
-
-    # Convert to Inverted Index for Card Scraper
-    # { "ST01-001": {"ST01": 2}, ... }
+        with open(METADATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(master_metadata, f, indent=2)
+            
+    # Invert for Card Scraper
     inverted_map = {}
     for deck_id, cards in master_decks.items():
         for card_id, count in cards.items():
@@ -206,16 +267,14 @@ def discover_sets():
                     soup = BeautifulSoup(resp.content, "html.parser")
                     if soup.select_one(".cardName, h1"):
                         exists = True
-            except:
-                pass
+            except: pass
 
             if exists:
                 found_sets.append({"code": set_code, "limit": 200})
                 set_miss_streak = 0
             else:
                 set_miss_streak += 1
-                if set_miss_streak >= 2: 
-                    break 
+                if set_miss_streak >= 2: break 
         print(" Done.")
             
     if not found_sets:
@@ -274,7 +333,6 @@ def scrape_card(card_id, deck_info_map, existing_card=None):
         else:
             final_image_url = upload_image_to_cloudinary(IMAGE_URL_TEMPLATE.format(card_id), card_id)
 
-        # Deck Enrichment
         deck_quantities = deck_info_map.get(card_id, {})
 
         return {
@@ -297,7 +355,7 @@ def scrape_card(card_id, deck_info_map, existing_card=None):
             "source_title": raw_stats["source"],
             "image_url": final_image_url,
             "release_pack": raw_stats["release"],
-            "deck_quantities": deck_quantities, # Auto-Populated Column
+            "deck_quantities": deck_quantities, 
             "last_updated": int(time.time()) 
         }
     except Exception as e:
@@ -312,7 +370,7 @@ def save_db(db):
             json.dump(data_list, f, indent=2, ensure_ascii=False)
 
 def run_update():
-    # 1. Sync Decks First
+    # 1. Dynamic Deck Discovery & Sync
     deck_map = sync_decks()
 
     # 2. Load Card DB
@@ -325,8 +383,7 @@ def run_update():
                 for c in data_list:
                     key = c.get('id', c.get('cardNo'))
                     if key: master_db[key] = c
-        except:
-            print("    ⚠️ Error reading existing JSON. Starting fresh.")
+        except: pass
     
     if not all([os.getenv('CLOUDINARY_CLOUD_NAME'), os.getenv('CLOUDINARY_API_KEY')]):
         print("\n    🛑 WARNING: Cloudinary credentials missing.")
@@ -346,8 +403,6 @@ def run_update():
         for i in range(1, limit + 1):
             card_id = f"{code}-{i:03d}"
             
-            # Logic: If not FULL_CHECK, we skip existing. 
-            # BUT, if we have new deck data for this card, we force an update to inject it.
             existing_card = master_db.get(card_id)
             force_deck_update = False
             
@@ -375,7 +430,7 @@ def run_update():
                     print(f"    . {card_id} not found (Miss {miss_streak}/{max_misses})")
                 else:
                     print(f"    🛑 Max misses reached for {code}. Moving to next set.")
-                    break # The "3 Failures Move On" Rule for Sets
+                    break 
             
             time.sleep(0.1) 
             if i % 200 == 0: save_db(master_db) 
