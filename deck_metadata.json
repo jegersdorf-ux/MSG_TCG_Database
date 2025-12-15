@@ -1,0 +1,32 @@
+{
+  "ST01": {
+    "name": "",
+    "strategy_url": "https://www.gundam-gcg.com/en/decks/deck-004.php",
+    "product_url": "https://www.gundam-gcg.com/en/products/st01.html"
+  },
+  "ST02": {
+    "name": "",
+    "strategy_url": "https://www.gundam-gcg.com/en/decks/deck-005.php",
+    "product_url": "https://www.gundam-gcg.com/en/products/st02.html"
+  },
+  "ST03": {
+    "name": "",
+    "strategy_url": "https://www.gundam-gcg.com/en/decks/deck-009.php",
+    "product_url": "https://www.gundam-gcg.com/en/products/st03.html"
+  },
+  "ST04": {
+    "name": "",
+    "strategy_url": "https://www.gundam-gcg.com/en/decks/deck-007.php",
+    "product_url": "https://www.gundam-gcg.com/en/products/st04.html"
+  },
+  "ST05": {
+    "name": "",
+    "strategy_url": "https://www.gundam-gcg.com/en/decks/deck-010.php",
+    "product_url": "https://www.gundam-gcg.com/en/products/st05.html"
+  },
+  "ST06": {
+    "name": "",
+    "strategy_url": "https://www.gundam-gcg.com/en/decks/deck-016.php",
+    "product_url": "https://www.gundam-gcg.com/en/products/st06.html"
+  }
+}
