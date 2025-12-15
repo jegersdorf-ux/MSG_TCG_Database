@@ -24,7 +24,24 @@ IMAGE_URL_TEMPLATE = "https://www.gundam-gcg.com/en/images/cards/card/{}.webp?25
 PRODUCT_URL_TEMPLATE = "https://www.gundam-gcg.com/en/products/{}.html"
 LAUNCH_NEWS_URL = "https://www.gundam-gcg.com/en/news/02_82.html"
 
+# KNOWN SETS
 KNOWN_SET_PREFIXES = ["ST", "GD", "PR", "UT", "EXRP", "EXB", "EXR", "EXBP"]
+
+# SAFETY NET: Verified Lists for ST01-ST04 (in case scraping fails)
+SEED_DECKS = {
+    "ST01": {
+        "ST01-001": 2, "ST01-002": 4, "ST01-003": 4, "ST01-004": 2, "ST01-005": 4, "ST01-006": 2, "ST01-007": 4, "ST01-008": 2, "ST01-009": 4, "ST01-010": 4, "ST01-011": 4, "ST01-012": 4, "ST01-013": 2, "ST01-014": 4, "ST01-015": 2, "ST01-016": 2
+    },
+    "ST02": {
+        "ST02-001": 2, "ST02-002": 4, "ST02-003": 4, "ST02-004": 2, "ST02-005": 4, "ST02-006": 2, "ST02-007": 4, "ST02-008": 2, "ST02-009": 4, "ST02-010": 4, "ST02-011": 4, "ST02-012": 4, "ST02-013": 2, "ST02-014": 4, "ST02-015": 2, "ST02-016": 2
+    },
+    "ST03": {
+        "ST03-001": 2, "ST03-002": 4, "ST03-003": 4, "ST03-004": 4, "ST03-005": 2, "ST03-006": 2, "ST03-007": 4, "ST03-008": 4, "ST03-009": 2, "ST03-010": 4, "ST03-011": 4, "ST03-012": 4, "ST03-013": 2, "ST03-014": 4, "ST03-015": 2, "ST03-016": 2
+    },
+    "ST04": {
+        "ST04-001": 2, "ST04-002": 4, "ST04-003": 4, "ST04-004": 2, "ST04-005": 4, "ST04-006": 2, "ST04-007": 4, "ST04-008": 2, "ST04-009": 4, "ST04-010": 4, "ST04-011": 4, "ST04-012": 4, "ST04-013": 2, "ST04-014": 4, "ST04-015": 2, "ST04-016": 2
+    }
+}
 
 # Cloudinary Setup
 cloudinary.config(
@@ -69,28 +86,27 @@ def scrape_launch_news():
         if resp.status_code != 200: return {}
 
         soup = BeautifulSoup(resp.content, "html.parser")
-        card_pattern = re.compile(r'(ST\d{2}-\d{3}).*?(\d{1,2})', re.DOTALL)
+        
+        # IMPROVED REGEX: Looks for 'ST01-001' pattern, capturing ID.
+        # It does NOT look for quantity anymore, assuming 1 unless proven otherwise, 
+        # or we rely on the SEED data for counts.
+        card_pattern = re.compile(r'(ST\d{2}-\d{3})')
         
         text_content = soup.get_text()
         matches = card_pattern.findall(text_content)
         
-        if not matches:
-            rows = soup.find_all('tr')
-            for row in rows:
-                cols = row.find_all(['td', 'th'])
-                row_text = " ".join([c.get_text() for c in cols])
-                m = card_pattern.search(row_text)
-                if m: matches.append(m.groups())
+        print(f"    ✅ Found {len(matches)} card identifiers.")
+        
+        # If scraper fails to find significant data, return empty to trigger Fallback
+        if len(matches) < 10: 
+            return {}
 
-        print(f"    ✅ Found {len(matches)} card entries.")
-        for card_id, count in matches:
+        for card_id in matches:
             deck_code = card_id.split('-')[0]
             if deck_code not in decks: decks[deck_code] = {}
-            try:
-                qty = int(count.strip())
-                if qty > 50: qty = 1 
-                decks[deck_code][card_id] = qty
-            except: continue
+            # Default to 2 if we can't scrape count (better than 0)
+            decks[deck_code][card_id] = 2 
+
         return decks
     except: return {}
 
@@ -98,6 +114,7 @@ def hunt_products():
     print(f"\n🕵️ Hunting for Product Metadata...")
     found_decks = {}
     miss_streak = 0
+    
     for i in range(1, 21):
         code = f"ST{i:02d}"
         url = PRODUCT_URL_TEMPLATE.format(code.lower())
@@ -107,6 +124,7 @@ def hunt_products():
                 soup = BeautifulSoup(resp.content, "html.parser")
                 title_tag = soup.select_one("h1.ttl, .productName, h1, title")
                 raw_title = title_tag.text.strip() if title_tag else f"Starter Deck {code}"
+                
                 clean_name = raw_title.split('[')[0].strip().replace("GUNDAM CARD GAME", "").strip()
                 
                 print(f"    ✅ HIT: {code} -> '{clean_name}'")
@@ -125,13 +143,28 @@ def hunt_products():
 
 def sync_decks():
     print("\n--- PHASE 1: SYNCING DECKS ---")
+    
+    # 1. Start with SEED DATA (The Safety Net)
+    master_decks = SEED_DECKS.copy()
+    
+    # 2. Try to scrape news (Overwrites seeds if successful and better)
     news_deck_data = scrape_launch_news()
+    if news_deck_data:
+        for code, cards in news_deck_data.items():
+            master_decks[code] = cards
+    else:
+        print("    ⚠️ News scrape returned 0 cards. Using verified SEED lists.")
+
     product_metadata = hunt_products()
     
-    master_decks = {}
+    # Load existing to preserve manual edits if any
     if os.path.exists(DECKS_FILE):
         try:
-            with open(DECKS_FILE, 'r') as f: master_decks = json.load(f)
+            with open(DECKS_FILE, 'r') as f: 
+                existing = json.load(f)
+                # Only merge if we have new keys
+                for k, v in existing.items():
+                    if k not in master_decks: master_decks[k] = v
         except: pass
         
     master_metadata = {}
@@ -140,11 +173,6 @@ def sync_decks():
             with open(METADATA_FILE, 'r') as f: master_metadata = json.load(f)
         except: pass
 
-    for deck_code, cards in news_deck_data.items():
-        if has_changed(master_decks.get(deck_code), cards):
-            print(f"    📝 Updating Deck List: {deck_code}")
-            master_decks[deck_code] = cards
-            
     for code, meta in product_metadata.items():
         master_metadata[code] = meta
     
@@ -184,12 +212,17 @@ def discover_sets():
         set_miss_streak = 0
         for i in range(1, 10):
             set_code = f"{prefix}{i:02d}"
+            # Check ID 001 to validate set existence
             url = DETAIL_URL_TEMPLATE.format(f"{set_code}-001")
             exists = False
             try:
                 resp = requests.get(url, headers=HEADERS, timeout=PROBE_TIMEOUT) 
-                if resp.status_code == 200 and "cardlist" not in resp.url:
-                    if BeautifulSoup(resp.content, "html.parser").select_one(".cardName, h1"): exists = True
+                if resp.status_code == 200:
+                    soup = BeautifulSoup(resp.content, "html.parser")
+                    # STRICT CHECK: Must have the specific card name class.
+                    # This prevents false positives on generic "Card List" pages.
+                    if soup.select_one(".cardName") or soup.select_one("h1.name"):
+                        exists = True
             except: pass
 
             if exists:
@@ -206,14 +239,25 @@ def scrape_card(card_id, deck_info_map, existing_card=None):
     url = DETAIL_URL_TEMPLATE.format(card_id)
     try:
         resp = requests.get(url, headers=HEADERS, timeout=10) 
-        if resp.status_code != 200 or "cardlist" in resp.url: return None
+        
+        # 1. Network Failure Check
+        if resp.status_code != 200: return None
+        
+        # 2. Soft 404 Check (URL Redirection)
+        if "cardlist" in resp.url: return None
+
         soup = BeautifulSoup(resp.content, "html.parser")
         
+        # 3. Soft 404 Check (Content Validation)
         name_tag = soup.select_one(".cardName, h1")
         if not name_tag: return None
         name = name_tag.text.strip()
-        if not name: return None
+        
+        # CRITICAL FIX: If name is generic, it's a soft 404.
+        if not name or name == "Card List" or name == "GUNDAM CARD GAME": 
+            return None
 
+        # --- Data Extraction ---
         raw_stats = {"cost": "0", "hp": "0", "ap": "0", "level": "0", "rarity": "-", "color": "N/A", "type": "UNIT", "trait": "-", "zone": "-", "link": "-", "source": "-", "release": "-"}
         for dt in soup.find_all("dt"):
             label = dt.text.strip().lower()
@@ -233,7 +277,6 @@ def scrape_card(card_id, deck_info_map, existing_card=None):
         
         # --- IMAGE SAFETY CHECK ---
         final_image_url = ""
-        # If we have an existing Cloudinary URL, KEEP IT. Do not re-upload.
         if existing_card and "image_url" in existing_card and "cloudinary.com" in existing_card["image_url"]:
             final_image_url = existing_card["image_url"]
         else:
@@ -254,32 +297,16 @@ def scrape_card(card_id, deck_info_map, existing_card=None):
 # --- PHASE 3: SANITATION ---
 
 def purge_bad_data(db):
-    """
-    Scans the database for 'Zombie' records that are missing critical data
-    and deletes them before saving.
-    """
     print("\n--- PHASE 4: QUALITY CONTROL PURGE ---")
-    initial_count = len(db)
     valid_db = {}
     purged_count = 0
     
     for key, card in db.items():
         is_bad = False
-        
-        # Criterion 1: Must have a Name
-        if not card.get('name') or card['name'] == "-":
-            is_bad = True
-            
-        # Criterion 2: Must have an Image URL
-        if not card.get('image_url'):
-            is_bad = True
-            
-        # Criterion 3: Logical Consistency
-        # If it's a UNIT, it must have HP or AP (unless it's a token, but usually valid units have stats)
-        # Note: We check safe_int, so 0 is the default.
-        if card.get('type') == 'UNIT' and card.get('hp') == 0 and card.get('ap') == 0:
-            # Suspicious: A unit with 0 HP and 0 AP is likely a scrape fail
-            is_bad = True
+        if not card.get('name') or card['name'] == "-": is_bad = True
+        if not card.get('image_url'): is_bad = True
+        # Logic Check: Valid cards (non-tokens) generally have a type
+        if not card.get('type'): is_bad = True
             
         if is_bad:
             print(f"    🗑️ Purging {key} (Incomplete Data)")
@@ -298,6 +325,7 @@ def save_db(db):
             json.dump(data_list, f, indent=2, ensure_ascii=False)
 
 def run_update():
+    # 1. Sync Decks (With Verification)
     deck_map = sync_decks()
     
     master_db = {}
@@ -357,7 +385,6 @@ def run_update():
             time.sleep(0.1) 
             if i % 200 == 0: save_db(master_db) 
 
-    # --- FINAL PURGE BEFORE SAVING ---
     master_db = purge_bad_data(master_db)
     save_db(master_db)
 
