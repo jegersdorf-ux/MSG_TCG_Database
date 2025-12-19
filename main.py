@@ -76,6 +76,26 @@ def has_changed(old, new):
     n.pop('last_updated', None)
     return json.dumps(o, sort_keys=True) != json.dumps(n, sort_keys=True)
 
+def check_url_exists(url):
+    """Checks if a URL exists (Status 200) without downloading the content."""
+    try:
+        resp = requests.head(url, headers=HEADERS, timeout=3)
+        return resp.status_code == 200
+    except:
+        return False
+
+def extract_rarities(rarity_text):
+    """
+    Splits rarity string into a clean list based on ALL common delimiters found on Gundam sites.
+    Input: "R・R+"      -> Output: ['R', 'R+']
+    Input: "LR/LR+/LR++" -> Output: ['LR', 'LR+', 'LR++']
+    Input: "C.C+"        -> Output: ['C', 'C+']
+    """
+    if not rarity_text: return ["-"]
+    # Split by: dot (.), slash (/), comma (,), pipe (|), Japanese dot (・)
+    parts = re.split(r'[・/,\.\|\u30FB]', rarity_text) 
+    return [p.strip() for p in parts if p.strip()]
+
 # --- PHASE 1: DECK SYNC & DISCOVERY ---
 
 def scrape_launch_news():
@@ -217,20 +237,28 @@ def discover_sets():
     if not found_sets: return [{"code": "ST01", "limit": 30}]
     return found_sets
 
-def scrape_card(card_id, deck_info_map, existing_card=None):
-    url = DETAIL_URL_TEMPLATE.format(card_id)
+def scrape_card_variants(base_card_id, deck_info_map, existing_db=None):
+    """
+    Scrapes base card + variants.
+    Ties RARITY strictly to the site's rarity list by index.
+    """
+    url = DETAIL_URL_TEMPLATE.format(base_card_id)
+    base_stats = None
+    rarity_list = []
+
+    # 1. Fetch Base Card Stats
     try:
         resp = requests.get(url, headers=HEADERS, timeout=10) 
-        if resp.status_code != 200: return None
-        if "cardlist" in resp.url: return None
+        if resp.status_code != 200: return []
+        if "cardlist" in resp.url: return []
 
         soup = BeautifulSoup(resp.content, "html.parser")
         
         name_tag = soup.select_one(".cardName, h1")
-        if not name_tag: return None
+        if not name_tag: return []
         name = name_tag.text.strip()
         if not name or name == "Card List" or name == "GUNDAM CARD GAME": 
-            return None
+            return []
 
         # --- Data Extraction ---
         raw_stats = {"cost": "0", "hp": "0", "ap": "0", "level": "0", "rarity": "-", "color": "N/A", "type": "UNIT", "trait": "-", "zone": "-", "link": "-", "source": "-", "release": "-"}
@@ -245,48 +273,94 @@ def scrape_card(card_id, deck_info_map, existing_card=None):
             elif "trait" in label: raw_stats["trait"] = val
             elif "release" in label or "where" in label: raw_stats["release"] = val
             elif "rarity" in label: raw_stats["rarity"] = val
-            
-            # --- NEW ADDITIONS: LEVEL & LINK ---
             elif "lv" in label or "level" in label: raw_stats["level"] = val
             elif "link" in label: raw_stats["link"] = val
 
-        if soup.select_one(".rarity"): raw_stats["rarity"] = soup.select_one(".rarity").text.strip()
+        # --- PARSE RARITIES FROM TEXT ---
+        # Look for full strings like "LR / LR+ / LR++"
+        if soup.select_one(".rarity"): 
+            raw_rarity_text = soup.select_one(".rarity").text.strip()
+            rarity_list = extract_rarities(raw_rarity_text)
+            raw_stats["rarity"] = rarity_list[0] # Base default
+        else:
+            rarity_list = [raw_stats["rarity"]]
+
         block_icon = safe_int(soup.select_one(".blockIcon").text.strip()) if soup.select_one(".blockIcon") else 0
         effect_text = soup.select_one(".cardDataRow.overview .dataTxt").text.strip().replace("<br>", "\n") if soup.select_one(".cardDataRow.overview .dataTxt") else ""
         
-        final_image_url = ""
-        if existing_card and "image_url" in existing_card and "cloudinary.com" in existing_card["image_url"]:
-            final_image_url = existing_card["image_url"]
-        else:
-            final_image_url = upload_image_to_cloudinary(IMAGE_URL_TEMPLATE.format(card_id), card_id)
+        deck_quantities = deck_info_map.get(base_card_id, {})
 
-        deck_quantities = deck_info_map.get(card_id, {})
-
-        return {
-            "id": card_id, 
-            "card_no": card_id, 
+        base_stats = {
+            "card_no": base_card_id, 
             "name": name, 
-            "series": card_id.split("-")[0],
+            "series": base_card_id.split("-")[0],
             "cost": safe_int(raw_stats["cost"]), 
             "hp": safe_int(raw_stats["hp"]), 
             "ap": safe_int(raw_stats["ap"]),
-            
-            # ADDED: Level and Link
             "level": safe_int(raw_stats["level"]), 
             "link": raw_stats["link"], 
-            
             "color": raw_stats["color"], 
-            "rarity": raw_stats["rarity"], 
+            "rarity": raw_stats["rarity"], # Will be overwritten per variant
             "type": raw_stats["type"],
             "block_icon": block_icon, 
             "trait": raw_stats["trait"], 
             "effect_text": effect_text,
-            "image_url": final_image_url, 
             "release_pack": raw_stats["release"],
             "deck_quantities": deck_quantities, 
+            "available_rarities": rarity_list, # Full list for UI context
             "last_updated": int(time.time()) 
         }
-    except: return None
+
+    except: return []
+
+    if not base_stats: return []
+
+    # 2. Iterate Variants (Base -> p1 -> p2 -> ...)
+    found_cards = []
+    variant_index = 0
+
+    while True:
+        suffix = "" if variant_index == 0 else f"_p{variant_index}"
+        current_id = f"{base_card_id}{suffix}"
+        target_image_url = IMAGE_URL_TEMPLATE.format(current_id)
+
+        # Stop if image missing
+        if not check_url_exists(target_image_url):
+            if variant_index == 0: return [] 
+            else: break
+
+        card_entry = base_stats.copy()
+        card_entry["id"] = current_id 
+        
+        # --- STRICT RARITY MAPPING ---
+        # Map current image index to the rarity list index.
+        # index 0 (base) -> rarity_list[0] (e.g. LR)
+        # index 1 (_p1)  -> rarity_list[1] (e.g. LR+)
+        # index 2 (_p2)  -> rarity_list[2] (e.g. LR++)
+        if variant_index < len(rarity_list):
+            card_entry["rarity"] = rarity_list[variant_index]
+        else:
+            # Fallback: If image exists but text didn't list a distinct rarity for it,
+            # we default to the last known rarity. We do NOT invent "++".
+            card_entry["rarity"] = rarity_list[-1]
+        # -----------------------------
+
+        # Handle Cloudinary
+        existing_card = existing_db.get(current_id) if existing_db else None
+        final_image_url = ""
+        
+        if existing_card and "image_url" in existing_card and "cloudinary.com" in existing_card["image_url"]:
+             final_image_url = existing_card["image_url"]
+        else:
+             final_image_url = upload_image_to_cloudinary(target_image_url, current_id)
+        
+        card_entry["image_url"] = final_image_url
+        found_cards.append(card_entry)
+        
+        variant_index += 1
+        if variant_index > 20: break 
+
+    return found_cards
 
 # --- PHASE 3: SANITATION ---
 
@@ -345,41 +419,32 @@ def run_update():
         miss_streak = 0
         
         for i in range(1, limit + 1):
-            card_id = f"{code}-{i:03d}"
-            existing_card = master_db.get(card_id)
-            force_deck_update = False
+            base_card_id = f"{code}-{i:03d}"
             
-            if existing_card:
-                old_decks = existing_card.get("deck_quantities", {})
-                new_decks = deck_map.get(card_id, {})
-                if str(old_decks) != str(new_decks): force_deck_update = True
-                
-                # Force update if level/link are missing from existing records
-                if "level" not in existing_card or "link" not in existing_card:
-                    force_deck_update = True
-
-            if not FULL_CHECK and existing_card and not force_deck_update:
-                miss_streak = 0
-                continue
-                
-            new_card_data = scrape_card(card_id, deck_map, existing_card=existing_card)
+            found_variants = scrape_card_variants(base_card_id, deck_map, existing_db=master_db)
             
-            if new_card_data:
-                if has_changed(existing_card, new_card_data):
-                    status = "UPDATE" if existing_card else "NEW"
-                    print(f"    📝 {status}: {card_id}")      
-                    master_db[card_id] = new_card_data
+            if found_variants:
+                for new_card_data in found_variants:
+                    c_id = new_card_data['id']
+                    existing_card = master_db.get(c_id)
+                    
+                    if has_changed(existing_card, new_card_data):
+                        status = "UPDATE" if existing_card else "NEW"
+                        # Print rarity to verify fix
+                        print(f"    📝 {status}: {c_id} (Rarity: {new_card_data['rarity']})")        
+                        master_db[c_id] = new_card_data
+                
                 miss_streak = 0
             else:
                 miss_streak += 1
                 if miss_streak <= MAX_MISSES:
-                    print(f"    . {card_id} not found (Miss {miss_streak}/{MAX_MISSES})")
+                    print(f"    . {base_card_id} not found (Miss {miss_streak}/{MAX_MISSES})")
                 else:
                     print(f"    🛑 Max misses reached for {code}. Moving to next set.")
                     break 
             
             time.sleep(0.1) 
-            if i % 200 == 0: save_db(master_db) 
+            if i % 50 == 0: save_db(master_db)
 
     master_db = purge_bad_data(master_db)
     save_db(master_db)
