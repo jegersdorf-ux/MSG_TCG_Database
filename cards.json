@@ -16146,5 +16146,203 @@
     "last_updated": 1766122221,
     "id": "GD02-129_p1",
     "image_url": "https://res.cloudinary.com/dkwr3cjth/image/upload/v1766120586/gundam_cards/GD02-129_p1.webp"
+  },
+  {
+    "card_no": "ST01-001",
+    "name": "Gundam",
+    "series": "ST01",
+    "cost": 3,
+    "hp": 4,
+    "ap": 0,
+    "level": 4,
+    "link": "[Amuro Ray]",
+    "color": "Blue",
+    "rarity": "LR+",
+    "type": "UNIT",
+    "block_icon": 1,
+    "trait": "(Earth Federation) (White Base Team)",
+    "effect_text": "<Repair 2> (At the end of your turn, this Unit recovers the specified number of HP.)【During Pair】During your turn, all your Units get AP+1.",
+    "release_pack": "Heroic Beginnings [ST01]",
+    "deck_quantities": {
+      "ST01": 2
+    },
+    "available_rarities": [
+      "LR"
+    ],
+    "last_updated": 1766148824,
+    "id": "ST01-001_p4",
+    "image_url": "https://res.cloudinary.com/dkwr3cjth/image/upload/v1766148828/gundam_cards/ST01-001_p4.webp"
+  },
+  {
+    "card_no": "ST02-010",
+    "name": "Heero Yuy",
+    "series": "ST02",
+    "cost": 1,
+    "hp": 1,
+    "ap": 2,
+    "level": 4,
+    "link": "-",
+    "color": "Green",
+    "rarity": "C+",
+    "type": "PILOT",
+    "block_icon": 1,
+    "trait": "(Operation Meteor)",
+    "effect_text": "【Burst】Add this card to your hand.【During Link】This Unit gets AP+1 and HP+1.",
+    "release_pack": "Wings of Advance [ST02]",
+    "deck_quantities": {
+      "ST02": 4
+    },
+    "available_rarities": [
+      "C"
+    ],
+    "last_updated": 1766148899,
+    "id": "ST02-010_p4",
+    "image_url": "https://res.cloudinary.com/dkwr3cjth/image/upload/v1766148902/gundam_cards/ST02-010_p4.webp"
+  },
+  {
+    "card_no": "ST03-008",
+    "name": "Zaku Ⅱ",
+    "series": "ST03",
+    "cost": 1,
+    "hp": 2,
+    "ap": 1,
+    "level": 2,
+    "link": "-",
+    "color": "Green",
+    "rarity": "C+",
+    "type": "UNIT",
+    "block_icon": 1,
+    "trait": "(Zeon)",
+    "effect_text": "【Attack】This Unit gets AP+2 during this turn.",
+    "release_pack": "Zeon's Rush [ST03]",
+    "deck_quantities": {
+      "ST03": 4
+    },
+    "available_rarities": [
+      "C"
+    ],
+    "last_updated": 1766148942,
+    "id": "ST03-008_p4",
+    "image_url": "https://res.cloudinary.com/dkwr3cjth/image/upload/v1766148946/gundam_cards/ST03-008_p4.webp"
+  },
+  {
+    "card_no": "ST05-002",
+    "name": "Gundam Barbatos 2nd Form",
+    "series": "ST05",
+    "cost": 2,
+    "hp": 4,
+    "ap": 2,
+    "level": 4,
+    "link": "[Mikazuki Augus]",
+    "color": "Purple",
+    "rarity": "C+",
+    "type": "UNIT",
+    "block_icon": 1,
+    "trait": "(Tekkadan) (Gundam Frame)",
+    "effect_text": "While this Unit is damaged, it gets AP+2.",
+    "release_pack": "Iron Bloom [ST05]",
+    "deck_quantities": {},
+    "available_rarities": [
+      "C"
+    ],
+    "last_updated": 1766149024,
+    "id": "ST05-002_p3",
+    "image_url": "https://res.cloudinary.com/dkwr3cjth/image/upload/v1766149027/gundam_cards/ST05-002_p3.webp"
+  },
+  {
+    "card_no": "ST06-002",
+    "name": "GQuuuuuuX (Omega Psycommu)",
+    "series": "ST06",
+    "cost": 3,
+    "hp": 2,
+    "ap": 4,
+    "level": 4,
+    "link": "[Amate Yuzuriha (Machu)]",
+    "color": "Red",
+    "rarity": "C+",
+    "type": "UNIT",
+    "block_icon": 1,
+    "trait": "(Clan)",
+    "effect_text": "【Deploy】If another friendly (Clan) Unit is in play, choose 1 enemy Unit. Deal 1 damage to it.",
+    "release_pack": "Clan Unity [ST06]",
+    "deck_quantities": {},
+    "available_rarities": [
+      "C"
+    ],
+    "last_updated": 1766149068,
+    "id": "ST06-002_p3",
+    "image_url": "https://res.cloudinary.com/dkwr3cjth/image/upload/v1766149071/gundam_cards/ST06-002_p3.webp"
+  },
+  {
+    "card_no": "GD01-068",
+    "name": "Perfect Strike Gundam",
+    "series": "GD01",
+    "cost": 3,
+    "hp": 4,
+    "ap": 4,
+    "level": 5,
+    "link": "(Earth Alliance) Trait",
+    "color": "White",
+    "rarity": "R+",
+    "type": "UNIT",
+    "block_icon": 1,
+    "trait": "(Triple Ship Alliance)",
+    "effect_text": "<Blocker> (Rest this Unit to change the attack target to it.)【Deploy】Choose 1 enemy Unit with 1 HP. Return it to its owner's hand.",
+    "release_pack": "Newtype Rising [GD01]",
+    "deck_quantities": {},
+    "available_rarities": [
+      "R"
+    ],
+    "last_updated": 1766149249,
+    "id": "GD01-068_p2",
+    "image_url": "https://res.cloudinary.com/dkwr3cjth/image/upload/v1766149251/gundam_cards/GD01-068_p2.webp"
+  },
+  {
+    "card_no": "GD01-086",
+    "name": "Gundam Lfrith",
+    "series": "GD01",
+    "cost": 2,
+    "hp": 4,
+    "ap": 2,
+    "level": 3,
+    "link": "-",
+    "color": "White",
+    "rarity": "C+",
+    "type": "UNIT",
+    "block_icon": 1,
+    "trait": "(Vanadis Institute)",
+    "effect_text": "<Blocker> (Rest this Unit to change the attack target to it.)",
+    "release_pack": "Newtype Rising [GD01]",
+    "deck_quantities": {},
+    "available_rarities": [
+      "C"
+    ],
+    "last_updated": 1766149287,
+    "id": "GD01-086_p2",
+    "image_url": "https://res.cloudinary.com/dkwr3cjth/image/upload/v1766149290/gundam_cards/GD01-086_p2.webp"
+  },
+  {
+    "card_no": "GD01-100",
+    "name": "A Show of Resolve",
+    "series": "GD01",
+    "cost": 3,
+    "hp": 0,
+    "ap": 0,
+    "level": 4,
+    "link": "-",
+    "color": "Blue",
+    "rarity": "U+",
+    "type": "COMMAND",
+    "block_icon": 1,
+    "trait": "-",
+    "effect_text": "【Main】Draw 2.",
+    "release_pack": "Newtype Rising [GD01]",
+    "deck_quantities": {},
+    "available_rarities": [
+      "U"
+    ],
+    "last_updated": 1766149321,
+    "id": "GD01-100_p4",
+    "image_url": "https://res.cloudinary.com/dkwr3cjth/image/upload/v1766149325/gundam_cards/GD01-100_p4.webp"
   }
 ]
