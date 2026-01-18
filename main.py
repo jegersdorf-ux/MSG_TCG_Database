@@ -5,9 +5,6 @@ import json
 import os
 import time
 import re
-import cloudinary
-import cloudinary.uploader
-import cloudinary.api
 
 # --- CONFIGURATION ---
 FULL_CHECK = False 
@@ -19,8 +16,9 @@ DECKS_FILE = "decks.json"
 METADATA_FILE = "deck_metadata.json"
 
 # URLs
+# NOTE: Verify if the site uses .webp or .png. The logic below checks availability.
 DETAIL_URL_TEMPLATE = "https://www.gundam-gcg.com/en/cards/detail.php?detailSearch={}"
-IMAGE_URL_TEMPLATE = "https://www.gundam-gcg.com/en/images/cards/card/{}.webp"
+IMAGE_URL_TEMPLATE = "https://www.gundam-gcg.com/en/images/cards/card/{}.webp" 
 PRODUCT_URL_TEMPLATE = "https://www.gundam-gcg.com/en/products/{}.html"
 LAUNCH_NEWS_URL = "https://www.gundam-gcg.com/en/news/02_82.html"
 
@@ -43,19 +41,9 @@ SEED_DECKS = {
     }
 }
 
-# Cloudinary Setup
-cloudinary.config(
-    cloud_name = os.getenv('CLOUDINARY_CLOUD_NAME'),
-    api_key = os.getenv('CLOUDINARY_API_KEY'),
-    api_secret = os.getenv('CLOUDINARY_API_SECRET'),
-    secure = True
-)
-
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
-
-RATE_LIMIT_HIT = False
 
 # --- UTILITY FUNCTIONS ---
 
@@ -72,6 +60,7 @@ def has_changed(old, new):
     if not old: return True
     o = old.copy()
     n = new.copy()
+    # Ignore timestamps when comparing
     o.pop('last_updated', None)
     n.pop('last_updated', None)
     return json.dumps(o, sort_keys=True) != json.dumps(n, sort_keys=True)
@@ -87,7 +76,7 @@ def check_url_exists(url):
 def extract_rarities(rarity_text):
     """
     Splits rarity string into a clean list based on ALL common delimiters found on Gundam sites.
-    Input: "R・R+"      -> Output: ['R', 'R+']
+    Input: "R・R+"       -> Output: ['R', 'R+']
     Input: "LR/LR+/LR++" -> Output: ['LR', 'LR+', 'LR++']
     Input: "C.C+"        -> Output: ['C', 'C+']
     """
@@ -196,18 +185,6 @@ def sync_decks():
 
 # --- PHASE 2: CARD SCRAPING LOGIC ---
 
-def upload_image_to_cloudinary(image_url, public_id):
-    global RATE_LIMIT_HIT
-    if RATE_LIMIT_HIT: return image_url
-    try:
-        result = cloudinary.uploader.upload(image_url, public_id=f"gundam_cards/{public_id}", unique_filename=False, overwrite=True)
-        return result['secure_url']
-    except Exception as e:
-        if "420" in str(e) or "Rate Limit" in str(e):
-            print(f"    🛑 RATE LIMIT REACHED. Switching to pass-through mode.")
-            RATE_LIMIT_HIT = True
-        return image_url
-
 def discover_sets():
     print("\n--- PHASE 2: SET DISCOVERY ---")
     found_sets = []
@@ -240,8 +217,7 @@ def discover_sets():
 def scrape_card_variants(base_card_id, deck_info_map, existing_db=None):
     """
     Scrapes base card + variants.
-    Ties RARITY to the site's rarity list.
-    Logic: Uses index mapping from rarity list. If image exists but list runs out, appends '+'.
+    Saves direct official URLs instead of uploading to Cloudinary.
     """
     url = DETAIL_URL_TEMPLATE.format(base_card_id)
     base_stats = None
@@ -324,7 +300,7 @@ def scrape_card_variants(base_card_id, deck_info_map, existing_db=None):
         current_id = f"{base_card_id}{suffix}"
         target_image_url = IMAGE_URL_TEMPLATE.format(current_id)
 
-        # Stop if image missing
+        # Stop if official image missing
         if not check_url_exists(target_image_url):
             if variant_index == 0: return [] 
             else: break
@@ -334,25 +310,15 @@ def scrape_card_variants(base_card_id, deck_info_map, existing_db=None):
         
         # --- FIXED RARITY LOGIC ---
         if variant_index < len(rarity_list):
-            # If the site listed 3 rarities and we are on image 2, use the list
             card_entry["rarity"] = rarity_list[variant_index]
         else:
-            # Fallback: We found an image (_p1) but the text only said "C".
-            # This implies a Parallel Art (unlisted). Append a '+' to the last known rarity.
             last_known = rarity_list[-1]
             card_entry["rarity"] = f"{last_known}+"
         # --------------------------
 
-        # Handle Cloudinary
-        existing_card = existing_db.get(current_id) if existing_db else None
-        final_image_url = ""
+        # --- DIRECT LINK (NO CLOUDINARY) ---
+        card_entry["image_url"] = target_image_url
         
-        if existing_card and "image_url" in existing_card and "cloudinary.com" in existing_card["image_url"]:
-             final_image_url = existing_card["image_url"]
-        else:
-             final_image_url = upload_image_to_cloudinary(target_image_url, current_id)
-        
-        card_entry["image_url"] = final_image_url
         found_cards.append(card_entry)
         
         variant_index += 1
@@ -403,9 +369,6 @@ def run_update():
                     if key: master_db[key] = c
         except: pass
     
-    if not all([os.getenv('CLOUDINARY_CLOUD_NAME'), os.getenv('CLOUDINARY_API_KEY')]):
-        print("\n    🛑 WARNING: Cloudinary credentials missing.")
-
     sets = discover_sets()
     
     print(f"\n--- PHASE 3: CARD AUDIT ({'FULL' if FULL_CHECK else 'INCREMENTAL'}) ---")
@@ -428,7 +391,6 @@ def run_update():
                     
                     if has_changed(existing_card, new_card_data):
                         status = "UPDATE" if existing_card else "NEW"
-                        # Print rarity to verify fix
                         print(f"    📝 {status}: {c_id} (Rarity: {new_card_data['rarity']})")        
                         master_db[c_id] = new_card_data
                 
