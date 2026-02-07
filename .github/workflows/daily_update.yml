@@ -2,8 +2,8 @@ name: Daily Data & Image Update
 
 on:
   schedule:
-    # Runs every 12 hours (00:00, 12:00 UTC)
-    - cron: '0 */12 * * *'
+    # Runs every 23 hours (00:00, 12:00 UTC)
+    - cron: '0 */23 * * *'
   # Allows you to click a button to test it immediately
   workflow_dispatch:
 
