@@ -4,7 +4,7 @@
     "cards": [
       {
         "card_no": "ST01-001",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST01-002",
@@ -16,7 +16,7 @@
       },
       {
         "card_no": "ST01-004",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST01-005",
@@ -24,7 +24,7 @@
       },
       {
         "card_no": "ST01-006",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST01-007",
@@ -32,7 +32,7 @@
       },
       {
         "card_no": "ST01-008",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST01-009",
@@ -52,7 +52,7 @@
       },
       {
         "card_no": "ST01-013",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST01-014",
@@ -60,11 +60,11 @@
       },
       {
         "card_no": "ST01-015",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST01-016",
-        "quantity": 2
+        "quantity": 4
       }
     ]
   },
@@ -73,7 +73,7 @@
     "cards": [
       {
         "card_no": "ST02-001",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST02-002",
@@ -85,7 +85,7 @@
       },
       {
         "card_no": "ST02-004",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST02-005",
@@ -93,7 +93,7 @@
       },
       {
         "card_no": "ST02-006",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST02-007",
@@ -101,7 +101,7 @@
       },
       {
         "card_no": "ST02-008",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST02-009",
@@ -121,7 +121,7 @@
       },
       {
         "card_no": "ST02-013",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST02-014",
@@ -129,11 +129,11 @@
       },
       {
         "card_no": "ST02-015",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST02-016",
-        "quantity": 2
+        "quantity": 4
       }
     ]
   },
@@ -142,7 +142,7 @@
     "cards": [
       {
         "card_no": "ST03-001",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST03-002",
@@ -158,11 +158,11 @@
       },
       {
         "card_no": "ST03-005",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST03-006",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST03-007",
@@ -174,7 +174,7 @@
       },
       {
         "card_no": "ST03-009",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST03-010",
@@ -190,7 +190,7 @@
       },
       {
         "card_no": "ST03-013",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST03-014",
@@ -198,11 +198,11 @@
       },
       {
         "card_no": "ST03-015",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST03-016",
-        "quantity": 2
+        "quantity": 4
       }
     ]
   },
@@ -211,7 +211,7 @@
     "cards": [
       {
         "card_no": "ST04-001",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST04-002",
@@ -223,7 +223,7 @@
       },
       {
         "card_no": "ST04-004",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST04-005",
@@ -231,7 +231,7 @@
       },
       {
         "card_no": "ST04-006",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST04-007",
@@ -239,7 +239,7 @@
       },
       {
         "card_no": "ST04-008",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST04-009",
@@ -259,7 +259,7 @@
       },
       {
         "card_no": "ST04-013",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST04-014",
@@ -267,11 +267,271 @@
       },
       {
         "card_no": "ST04-015",
-        "quantity": 2
+        "quantity": 4
       },
       {
         "card_no": "ST04-016",
-        "quantity": 2
+        "quantity": 4
+      }
+    ]
+  },
+  "ST05": {
+    "name": "Iron Bloom",
+    "cards": [
+      {
+        "card_no": "ST05-001",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST05-002",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST05-003",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST05-004",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST05-005",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST05-006",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST05-007",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST05-008",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST05-009",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST05-010",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST05-011",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST05-012",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST05-013",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST05-014",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST05-015",
+        "quantity": 4
+      }
+    ]
+  },
+  "ST06": {
+    "name": "Clan Unity",
+    "cards": [
+      {
+        "card_no": "ST06-001",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST06-002",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST06-003",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST06-004",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST06-005",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST06-006",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST06-007",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST06-008",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST06-009",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST06-010",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST06-011",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST06-012",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST06-013",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST06-014",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST06-015",
+        "quantity": 4
+      }
+    ]
+  },
+  "ST07": {
+    "name": "Turn A",
+    "cards": [
+      {
+        "card_no": "ST07-001",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST07-002",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST07-003",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST07-004",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST07-005",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST07-006",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST07-007",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST07-008",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST07-009",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST07-010",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST07-011",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST07-012",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST07-013",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST07-014",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST07-015",
+        "quantity": 4
+      }
+    ]
+  },
+  "ST08": {
+    "name": "Flash of Radiance",
+    "cards": [
+      {
+        "card_no": "ST08-001",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST08-002",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST08-003",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST08-004",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST08-005",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST08-006",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST08-007",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST08-008",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST08-009",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST08-010",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST08-011",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST08-012",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST08-013",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST08-014",
+        "quantity": 4
+      },
+      {
+        "card_no": "ST08-015",
+        "quantity": 4
       }
     ]
   }
