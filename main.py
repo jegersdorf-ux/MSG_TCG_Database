@@ -8,7 +8,7 @@ import re
 
 # --- CONFIGURATION ---
 FULL_CHECK = False 
-MAX_MISSES = 3  # The "3 Strikes" Rule
+MAX_MISSES = 3 
 
 # Output Files
 JSON_FILE = "cards.json"
@@ -16,14 +16,21 @@ DECKS_FILE = "decks.json"
 METADATA_FILE = "deck_metadata.json"
 
 # URLs
-# NOTE: Verify if the site uses .webp or .png. The logic below checks availability.
 DETAIL_URL_TEMPLATE = "https://www.gundam-gcg.com/en/cards/detail.php?detailSearch={}"
 IMAGE_URL_TEMPLATE = "https://www.gundam-gcg.com/en/images/cards/card/{}.webp" 
 PRODUCT_URL_TEMPLATE = "https://www.gundam-gcg.com/en/products/{}.html"
 LAUNCH_NEWS_URL = "https://www.gundam-gcg.com/en/news/02_82.html"
 
-# KNOWN SETS
-KNOWN_SET_PREFIXES = ["ST", "GD", "PR", "UT", "EXRP", "EXB", "EXR", "EXBP"]
+# --- 1. UPDATED PREFIXES (Added 'T' for Tokens/Resources, 'EX' for generic) ---
+KNOWN_SET_PREFIXES = ["ST", "GD", "PR", "UT", "EXRP", "EXB", "EXR", "EXBP", "EX", "T"]
+
+# --- 2. SPECIAL ASSETS LIST (Force checking these specific IDs) ---
+# Use this for cards that don't follow sequential order or are far apart
+SPECIAL_ASSETS = [
+    "EX01-001", "EX01-002", "EX01-003", # Common EX Base formats
+    "T01-001", "T01-002",               # Common Token formats
+    "EX-001",                           # Alternative EX format
+]
 
 # SAFETY NET: Verified Lists for ST01-ST04
 SEED_DECKS = {
@@ -60,13 +67,11 @@ def has_changed(old, new):
     if not old: return True
     o = old.copy()
     n = new.copy()
-    # Ignore timestamps when comparing
     o.pop('last_updated', None)
     n.pop('last_updated', None)
     return json.dumps(o, sort_keys=True) != json.dumps(n, sort_keys=True)
 
 def check_url_exists(url):
-    """Checks if a URL exists (Status 200) without downloading the content."""
     try:
         resp = requests.head(url, headers=HEADERS, timeout=3)
         return resp.status_code == 200
@@ -74,14 +79,7 @@ def check_url_exists(url):
         return False
 
 def extract_rarities(rarity_text):
-    """
-    Splits rarity string into a clean list based on ALL common delimiters found on Gundam sites.
-    Input: "R・R+"       -> Output: ['R', 'R+']
-    Input: "LR/LR+/LR++" -> Output: ['LR', 'LR+', 'LR++']
-    Input: "C.C+"        -> Output: ['C', 'C+']
-    """
     if not rarity_text: return ["-"]
-    # Split by: dot (.), slash (/), comma (,), pipe (|), Japanese dot (・)
     parts = re.split(r'[・/,\.\|\u30FB]', rarity_text) 
     return [p.strip() for p in parts if p.strip()]
 
@@ -215,15 +213,10 @@ def discover_sets():
     return found_sets
 
 def scrape_card_variants(base_card_id, deck_info_map, existing_db=None):
-    """
-    Scrapes base card + variants.
-    Saves direct official URLs instead of uploading to Cloudinary.
-    """
     url = DETAIL_URL_TEMPLATE.format(base_card_id)
     base_stats = None
     rarity_list = []
 
-    # 1. Fetch Base Card Stats
     try:
         resp = requests.get(url, headers=HEADERS, timeout=10) 
         if resp.status_code != 200: return []
@@ -237,7 +230,6 @@ def scrape_card_variants(base_card_id, deck_info_map, existing_db=None):
         if not name or name == "Card List" or name == "GUNDAM CARD GAME": 
             return []
 
-        # --- Data Extraction ---
         raw_stats = {"cost": "0", "hp": "0", "ap": "0", "level": "0", "rarity": "-", "color": "N/A", "type": "UNIT", "trait": "-", "zone": "-", "link": "-", "source": "-", "release": "-"}
         for dt in soup.find_all("dt"):
             label = dt.text.strip().lower()
@@ -253,7 +245,6 @@ def scrape_card_variants(base_card_id, deck_info_map, existing_db=None):
             elif "lv" in label or "level" in label: raw_stats["level"] = val
             elif "link" in label: raw_stats["link"] = val
 
-        # --- PARSE RARITIES FROM TEXT ---
         if soup.select_one(".rarity"): 
             raw_rarity_text = soup.select_one(".rarity").text.strip()
             rarity_list = extract_rarities(raw_rarity_text)
@@ -291,7 +282,6 @@ def scrape_card_variants(base_card_id, deck_info_map, existing_db=None):
 
     if not base_stats: return []
 
-    # 2. Iterate Variants (Base -> p1 -> p2 -> ...)
     found_cards = []
     variant_index = 0
 
@@ -300,7 +290,6 @@ def scrape_card_variants(base_card_id, deck_info_map, existing_db=None):
         current_id = f"{base_card_id}{suffix}"
         target_image_url = IMAGE_URL_TEMPLATE.format(current_id)
 
-        # Stop if official image missing
         if not check_url_exists(target_image_url):
             if variant_index == 0: return [] 
             else: break
@@ -308,17 +297,13 @@ def scrape_card_variants(base_card_id, deck_info_map, existing_db=None):
         card_entry = base_stats.copy()
         card_entry["id"] = current_id 
         
-        # --- FIXED RARITY LOGIC ---
         if variant_index < len(rarity_list):
             card_entry["rarity"] = rarity_list[variant_index]
         else:
             last_known = rarity_list[-1]
             card_entry["rarity"] = f"{last_known}+"
-        # --------------------------
 
-        # --- DIRECT LINK (NO CLOUDINARY) ---
         card_entry["image_url"] = target_image_url
-        
         found_cards.append(card_entry)
         
         variant_index += 1
@@ -373,6 +358,16 @@ def run_update():
     
     print(f"\n--- PHASE 3: CARD AUDIT ({'FULL' if FULL_CHECK else 'INCREMENTAL'}) ---")
     
+    # 1. PROCESS SPECIAL ASSETS FIRST (Tokens, EX Bases)
+    print("\nProcessing Special Assets (Tokens & EX)...")
+    for asset_id in SPECIAL_ASSETS:
+        found = scrape_card_variants(asset_id, deck_map, existing_db=master_db)
+        if found:
+            for c in found:
+                master_db[c['id']] = c
+                print(f"    💎 Found Special Asset: {c['id']}")
+    
+    # 2. STANDARD SET PROCESSING
     for set_info in sets:
         code = set_info['code']
         limit = set_info['limit']
