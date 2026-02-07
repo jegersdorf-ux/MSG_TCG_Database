@@ -1,5 +1,4 @@
 import requests
-from requests.exceptions import Timeout, ConnectionError, RequestException
 from bs4 import BeautifulSoup
 import json
 import os
@@ -12,8 +11,7 @@ MAX_MISSES = 3
 
 # Output Files
 JSON_FILE = "cards.json"
-DECKS_FILE = "decks.json"
-METADATA_FILE = "deck_metadata.json"
+DECKS_FILE = "decks.json" # This will now be the "Friendly" file
 
 # URLs
 DETAIL_URL_TEMPLATE = "https://www.gundam-gcg.com/en/cards/detail.php?detailSearch={}"
@@ -21,99 +19,63 @@ IMAGE_URL_TEMPLATE = "https://www.gundam-gcg.com/en/images/cards/card/{}.webp"
 PRODUCT_URL_TEMPLATE = "https://www.gundam-gcg.com/en/products/{}.html"
 LAUNCH_NEWS_URL = "https://www.gundam-gcg.com/en/news/02_82.html"
 
-# --- 1. UPDATED PREFIXES (Added 'T' for Tokens/Resources, 'EX' for generic) ---
+# Prefixes
 KNOWN_SET_PREFIXES = ["ST", "GD", "PR", "UT", "EXRP", "EXB", "EXR", "EXBP", "EX", "T"]
 
-# --- 2. SPECIAL ASSETS LIST (Force checking these specific IDs) ---
-# Use this for cards that don't follow sequential order or are far apart
+# Special Assets (Tokens, etc)
 SPECIAL_ASSETS = [
-    "EX01-001", "EX01-002", "EX01-003", # Common EX Base formats
-    "T01-001", "T01-002",               # Common Token formats
-    "EX-001",                           # Alternative EX format
+    "EX01-001", "EX01-002", "EX01-003", 
+    "T01-001", "T01-002",               
+    "EX-001",                           
 ]
 
-# SAFETY NET: Verified Lists for ST01-ST04
-SEED_DECKS = {
-    "ST01": {
-        "ST01-001": 2, "ST01-002": 4, "ST01-003": 4, "ST01-004": 2, "ST01-005": 4, "ST01-006": 2, "ST01-007": 4, "ST01-008": 2, "ST01-009": 4, "ST01-010": 4, "ST01-011": 4, "ST01-012": 4, "ST01-013": 2, "ST01-014": 4, "ST01-015": 2, "ST01-016": 2
-    },
-    "ST02": {
-        "ST02-001": 2, "ST02-002": 4, "ST02-003": 4, "ST02-004": 2, "ST02-005": 4, "ST02-006": 2, "ST02-007": 4, "ST02-008": 2, "ST02-009": 4, "ST02-010": 4, "ST02-011": 4, "ST02-012": 4, "ST02-013": 2, "ST02-014": 4, "ST02-015": 2, "ST02-016": 2
-    },
-    "ST03": {
-        "ST03-001": 2, "ST03-002": 4, "ST03-003": 4, "ST03-004": 4, "ST03-005": 2, "ST03-006": 2, "ST03-007": 4, "ST03-008": 4, "ST03-009": 2, "ST03-010": 4, "ST03-011": 4, "ST03-012": 4, "ST03-013": 2, "ST03-014": 4, "ST03-015": 2, "ST03-016": 2
-    },
-    "ST04": {
-        "ST04-001": 2, "ST04-002": 4, "ST04-003": 4, "ST04-004": 2, "ST04-005": 4, "ST04-006": 2, "ST04-007": 4, "ST04-008": 2, "ST04-009": 4, "ST04-010": 4, "ST04-011": 4, "ST04-012": 4, "ST04-013": 2, "ST04-014": 4, "ST04-015": 2, "ST04-016": 2
-    }
+# Raw Seed Data (Still used for fallback)
+SEED_DECKS_RAW = {
+    "ST01": { "ST01-001": 2, "ST01-002": 4, "ST01-003": 4, "ST01-004": 2, "ST01-005": 4, "ST01-006": 2, "ST01-007": 4, "ST01-008": 2, "ST01-009": 4, "ST01-010": 4, "ST01-011": 4, "ST01-012": 4, "ST01-013": 2, "ST01-014": 4, "ST01-015": 2, "ST01-016": 2 },
+    "ST02": { "ST02-001": 2, "ST02-002": 4, "ST02-003": 4, "ST02-004": 2, "ST02-005": 4, "ST02-006": 2, "ST02-007": 4, "ST02-008": 2, "ST02-009": 4, "ST02-010": 4, "ST02-011": 4, "ST02-012": 4, "ST02-013": 2, "ST02-014": 4, "ST02-015": 2, "ST02-016": 2 },
+    "ST03": { "ST03-001": 2, "ST03-002": 4, "ST03-003": 4, "ST03-004": 4, "ST03-005": 2, "ST03-006": 2, "ST03-007": 4, "ST03-008": 4, "ST03-009": 2, "ST03-010": 4, "ST03-011": 4, "ST03-012": 4, "ST03-013": 2, "ST03-014": 4, "ST03-015": 2, "ST03-016": 2 },
+    "ST04": { "ST04-001": 2, "ST04-002": 4, "ST04-003": 4, "ST04-004": 2, "ST04-005": 4, "ST04-006": 2, "ST04-007": 4, "ST04-008": 2, "ST04-009": 4, "ST04-010": 4, "ST04-011": 4, "ST04-012": 4, "ST04-013": 2, "ST04-014": 4, "ST04-015": 2, "ST04-016": 2 }
 }
 
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-}
+HEADERS = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
 
-# --- UTILITY FUNCTIONS ---
-
+# --- UTILS ---
 def safe_int(val):
     if not val: return 0
-    try:
-        clean_val = re.sub(r'[^\d-]', '', str(val))
-        if not clean_val: return 0
-        return int(clean_val)
-    except:
-        return 0
-
-def has_changed(old, new):
-    if not old: return True
-    o = old.copy()
-    n = new.copy()
-    o.pop('last_updated', None)
-    n.pop('last_updated', None)
-    return json.dumps(o, sort_keys=True) != json.dumps(n, sort_keys=True)
+    try: return int(re.sub(r'[^\d-]', '', str(val)))
+    except: return 0
 
 def check_url_exists(url):
-    try:
-        resp = requests.head(url, headers=HEADERS, timeout=3)
-        return resp.status_code == 200
-    except:
-        return False
+    try: return requests.head(url, headers=HEADERS, timeout=3).status_code == 200
+    except: return False
 
 def extract_rarities(rarity_text):
     if not rarity_text: return ["-"]
-    parts = re.split(r'[・/,\.\|\u30FB]', rarity_text) 
-    return [p.strip() for p in parts if p.strip()]
+    return [p.strip() for p in re.split(r'[・/,\.\|\u30FB]', rarity_text) if p.strip()]
 
-# --- PHASE 1: DECK SYNC & DISCOVERY ---
+# --- DECK LOGIC ---
 
 def scrape_launch_news():
-    print(f"📡 Scraping Launch News ({LAUNCH_NEWS_URL})...")
+    print(f"📡 Scraping Launch News for deck lists...")
     decks = {}
     try:
         resp = requests.get(LAUNCH_NEWS_URL, headers=HEADERS, timeout=10)
         if resp.status_code != 200: return {}
-
         soup = BeautifulSoup(resp.content, "html.parser")
-        card_pattern = re.compile(r'(ST\d{2}-\d{3})')
-        text_content = soup.get_text()
-        matches = card_pattern.findall(text_content)
-        
-        print(f"    ✅ Found {len(matches)} card identifiers.")
-        
+        matches = re.findall(r'(ST\d{2}-\d{3})', soup.get_text())
         if len(matches) < 10: return {}
-
         for card_id in matches:
             deck_code = card_id.split('-')[0]
             if deck_code not in decks: decks[deck_code] = {}
+            # Assume 2 copies if scraping from text unless specified
             decks[deck_code][card_id] = 2 
-
         return decks
     except: return {}
 
 def hunt_products():
-    print(f"\n🕵️ Hunting for Product Metadata...")
+    print(f"    🕵️ Getting Deck Names...")
     found_decks = {}
     miss_streak = 0
-    
     for i in range(1, 21):
         code = f"ST{i:02d}"
         url = PRODUCT_URL_TEMPLATE.format(code.lower())
@@ -121,290 +83,191 @@ def hunt_products():
             resp = requests.get(url, headers=HEADERS, timeout=2)
             if resp.status_code == 200:
                 soup = BeautifulSoup(resp.content, "html.parser")
-                title_tag = soup.select_one("h1.ttl, .productName, h1, title")
-                raw_title = title_tag.text.strip() if title_tag else f"Starter Deck {code}"
-                clean_name = raw_title.split('[')[0].strip().replace("GUNDAM CARD GAME", "").strip()
-                
-                print(f"    ✅ HIT: {code} -> '{clean_name}'")
-                found_decks[code] = {"name": clean_name, "product_url": url}
+                title = soup.select_one("h1.ttl, .productName, h1, title")
+                raw = title.text.strip() if title else f"Starter Deck {code}"
+                clean = raw.split('[')[0].replace("GUNDAM CARD GAME", "").strip()
+                found_decks[code] = clean
+                print(f"        Found: {code} -> {clean}")
                 miss_streak = 0
             else:
                 miss_streak += 1
-            
             if miss_streak >= MAX_MISSES: break
-            time.sleep(0.1) 
-        except:
+        except: 
             miss_streak += 1
             if miss_streak >= MAX_MISSES: break
-            
     return found_decks
 
-def sync_decks():
-    print("\n--- PHASE 1: SYNCING DECKS ---")
-    master_decks = SEED_DECKS.copy()
-    news_deck_data = scrape_launch_news()
-    if news_deck_data:
-        for code, cards in news_deck_data.items():
-            master_decks[code] = cards
-    else:
-        print("    ⚠️ News scrape returned 0 cards. Using verified SEED lists.")
-
-    product_metadata = hunt_products()
+def generate_friendly_deck_json():
+    print("\n--- PHASE 1: GENERATING FRIENDLY DECK JSON ---")
     
-    if os.path.exists(DECKS_FILE):
-        try:
-            with open(DECKS_FILE, 'r') as f: 
-                existing = json.load(f)
-                for k, v in existing.items():
-                    if k not in master_decks: master_decks[k] = v
-        except: pass
+    # 1. Merge Raw Lists
+    raw_decks = SEED_DECKS_RAW.copy()
+    news_data = scrape_launch_news()
+    for k, v in news_data.items():
+        if k not in raw_decks: raw_decks[k] = v
+
+    # 2. Get Names
+    names = hunt_products()
+
+    # 3. Transform to Friendly Format
+    friendly_output = {}
+    
+    for deck_code, card_map in raw_decks.items():
+        deck_name = names.get(deck_code, f"Starter Deck {deck_code}")
         
-    master_metadata = {}
-    if os.path.exists(METADATA_FILE):
-        try:
-            with open(METADATA_FILE, 'r') as f: master_metadata = json.load(f)
-        except: pass
+        # Create the array of objects
+        card_list = []
+        for card_no, quantity in card_map.items():
+            card_list.append({
+                "card_no": card_no,
+                "quantity": quantity
+            })
+            
+        friendly_output[deck_code] = {
+            "name": deck_name,
+            "cards": card_list
+        }
 
-    for code, meta in product_metadata.items():
-        master_metadata[code] = meta
-    
-    print(f"    💾 Saving {len(master_decks)} decks...")
+    print(f"    💾 Saving friendly structure to {DECKS_FILE}...")
     with open(DECKS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(master_decks, f, indent=2)
-    with open(METADATA_FILE, 'w', encoding='utf-8') as f:
-        json.dump(master_metadata, f, indent=2)
+        json.dump(friendly_output, f, indent=2)
+    
+    # Return a simple map for the card scraper to use later
+    # (Card scraper just needs to know which cards belong to which deck ID)
+    simple_map = {}
+    for d_code, data in friendly_output.items():
+        for c in data['cards']:
+            cid = c['card_no']
+            if cid not in simple_map: simple_map[cid] = {}
+            simple_map[cid][d_code] = c['quantity']
+            
+    return simple_map
 
-    inverted_map = {}
-    for deck_id, cards in master_decks.items():
-        for card_id, count in cards.items():
-            if card_id not in inverted_map: inverted_map[card_id] = {}
-            inverted_map[card_id][deck_id] = count
-    return inverted_map
-
-# --- PHASE 2: CARD SCRAPING LOGIC ---
+# --- CARD LOGIC ---
 
 def discover_sets():
     print("\n--- PHASE 2: SET DISCOVERY ---")
     found_sets = []
-    PROBE_TIMEOUT = 5
     for prefix in KNOWN_SET_PREFIXES:
-        print(f"    Checking {prefix} series...", end="")
-        set_miss_streak = 0
+        print(f"    Checking {prefix}...", end="")
+        miss = 0
         for i in range(1, 10):
-            set_code = f"{prefix}{i:02d}"
-            url = DETAIL_URL_TEMPLATE.format(f"{set_code}-001")
-            exists = False
+            scode = f"{prefix}{i:02d}"
             try:
-                resp = requests.get(url, headers=HEADERS, timeout=PROBE_TIMEOUT) 
-                if resp.status_code == 200:
-                    soup = BeautifulSoup(resp.content, "html.parser")
-                    if soup.select_one(".cardName") or soup.select_one("h1.name"):
-                        exists = True
-            except: pass
-
-            if exists:
-                found_sets.append({"code": set_code, "limit": 200})
-                set_miss_streak = 0
-            else:
-                set_miss_streak += 1
-                if set_miss_streak >= 2: break 
+                if requests.head(DETAIL_URL_TEMPLATE.format(f"{scode}-001"), headers=HEADERS, timeout=2).status_code == 200:
+                    found_sets.append({"code": scode, "limit": 200})
+                    miss = 0
+                else: miss += 1
+            except: miss += 1
+            if miss >= 2: break
         print(" Done.")
     if not found_sets: return [{"code": "ST01", "limit": 30}]
     return found_sets
 
-def scrape_card_variants(base_card_id, deck_info_map, existing_db=None):
-    url = DETAIL_URL_TEMPLATE.format(base_card_id)
-    base_stats = None
-    rarity_list = []
-
+def scrape_card(card_id, deck_map):
+    url = DETAIL_URL_TEMPLATE.format(card_id)
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=10) 
-        if resp.status_code != 200: return []
-        if "cardlist" in resp.url: return []
-
+        resp = requests.get(url, headers=HEADERS, timeout=10)
+        if resp.status_code != 200 or "cardlist" in resp.url: return []
         soup = BeautifulSoup(resp.content, "html.parser")
         
-        name_tag = soup.select_one(".cardName, h1")
-        if not name_tag: return []
-        name = name_tag.text.strip()
-        if not name or name == "Card List" or name == "GUNDAM CARD GAME": 
-            return []
+        name = soup.select_one(".cardName, h1").text.strip()
+        if not name: return []
 
-        raw_stats = {"cost": "0", "hp": "0", "ap": "0", "level": "0", "rarity": "-", "color": "N/A", "type": "UNIT", "trait": "-", "zone": "-", "link": "-", "source": "-", "release": "-"}
-        for dt in soup.find_all("dt"):
-            label = dt.text.strip().lower()
-            val = dt.find_next_sibling("dd").text.strip() if dt.find_next_sibling("dd") else ""
-            if "cost" in label: raw_stats["cost"] = val
-            elif "hp" in label: raw_stats["hp"] = val
-            elif "ap" in label or "atk" in label: raw_stats["ap"] = val
-            elif "color" in label: raw_stats["color"] = val
-            elif "type" in label: raw_stats["type"] = val
-            elif "trait" in label: raw_stats["trait"] = val
-            elif "release" in label or "where" in label: raw_stats["release"] = val
-            elif "rarity" in label: raw_stats["rarity"] = val
-            elif "lv" in label or "level" in label: raw_stats["level"] = val
-            elif "link" in label: raw_stats["link"] = val
-
-        if soup.select_one(".rarity"): 
-            raw_rarity_text = soup.select_one(".rarity").text.strip()
-            rarity_list = extract_rarities(raw_rarity_text)
-            raw_stats["rarity"] = rarity_list[0] 
-        else:
-            rarity_list = [raw_stats["rarity"]]
-
-        block_icon = safe_int(soup.select_one(".blockIcon").text.strip()) if soup.select_one(".blockIcon") else 0
-        effect_text = soup.select_one(".cardDataRow.overview .dataTxt").text.strip().replace("<br>", "\n") if soup.select_one(".cardDataRow.overview .dataTxt") else ""
+        stats = {k: "0" for k in ["cost", "hp", "ap", "level"]}
+        meta = {k: "-" for k in ["color", "type", "trait", "rarity", "link"]}
         
-        deck_quantities = deck_info_map.get(base_card_id, {})
+        for dt in soup.find_all("dt"):
+            lbl = dt.text.strip().lower()
+            val = dt.find_next_sibling("dd").text.strip() if dt.find_next_sibling("dd") else ""
+            if "cost" in lbl: stats["cost"] = val
+            elif "hp" in lbl: stats["hp"] = val
+            elif "ap" in lbl or "atk" in lbl: stats["ap"] = val
+            elif "level" in lbl: stats["level"] = val
+            elif "color" in lbl: meta["color"] = val
+            elif "type" in lbl: meta["type"] = val
+            elif "trait" in lbl: meta["trait"] = val
+            elif "rarity" in lbl: meta["rarity"] = val
+            elif "link" in lbl: meta["link"] = val
 
-        base_stats = {
-            "card_no": base_card_id, 
-            "name": name, 
-            "series": base_card_id.split("-")[0],
-            "cost": safe_int(raw_stats["cost"]), 
-            "hp": safe_int(raw_stats["hp"]), 
-            "ap": safe_int(raw_stats["ap"]),
-            "level": safe_int(raw_stats["level"]), 
-            "link": raw_stats["link"], 
-            "color": raw_stats["color"], 
-            "rarity": raw_stats["rarity"], 
-            "type": raw_stats["type"],
-            "block_icon": block_icon, 
-            "trait": raw_stats["trait"], 
-            "effect_text": effect_text,
-            "release_pack": raw_stats["release"],
-            "deck_quantities": deck_quantities, 
-            "available_rarities": rarity_list, 
-            "last_updated": int(time.time()) 
+        rarities = extract_rarities(soup.select_one(".rarity").text.strip()) if soup.select_one(".rarity") else [meta["rarity"]]
+        effect = soup.select_one(".cardDataRow.overview .dataTxt").text.strip().replace("<br>", "\n") if soup.select_one(".cardDataRow.overview .dataTxt") else ""
+
+        base_data = {
+            "card_no": card_id, "name": name, "series": card_id.split("-")[0],
+            "cost": safe_int(stats["cost"]), "hp": safe_int(stats["hp"]), 
+            "ap": safe_int(stats["ap"]), "level": safe_int(stats["level"]),
+            "color": meta["color"], "type": meta["type"], "trait": meta["trait"],
+            "rarity": meta["rarity"], "link": meta["link"], "effect_text": effect,
+            "deck_quantities": deck_map.get(card_id, {}), "last_updated": int(time.time())
         }
 
+        # Variants
+        cards = []
+        idx = 0
+        while True:
+            suffix = "" if idx == 0 else f"_p{idx}"
+            cid = f"{card_id}{suffix}"
+            img = IMAGE_URL_TEMPLATE.format(cid)
+            if not check_url_exists(img):
+                if idx == 0: return []
+                break
+            
+            c = base_data.copy()
+            c["id"] = cid
+            c["image_url"] = img
+            c["rarity"] = rarities[idx] if idx < len(rarities) else f"{rarities[-1]}+"
+            cards.append(c)
+            idx += 1
+            if idx > 15: break
+            
+        return cards
     except: return []
 
-    if not base_stats: return []
-
-    found_cards = []
-    variant_index = 0
-
-    while True:
-        suffix = "" if variant_index == 0 else f"_p{variant_index}"
-        current_id = f"{base_card_id}{suffix}"
-        target_image_url = IMAGE_URL_TEMPLATE.format(current_id)
-
-        if not check_url_exists(target_image_url):
-            if variant_index == 0: return [] 
-            else: break
-
-        card_entry = base_stats.copy()
-        card_entry["id"] = current_id 
-        
-        if variant_index < len(rarity_list):
-            card_entry["rarity"] = rarity_list[variant_index]
-        else:
-            last_known = rarity_list[-1]
-            card_entry["rarity"] = f"{last_known}+"
-
-        card_entry["image_url"] = target_image_url
-        found_cards.append(card_entry)
-        
-        variant_index += 1
-        if variant_index > 20: break 
-
-    return found_cards
-
-# --- PHASE 3: SANITATION ---
-
-def purge_bad_data(db):
-    print("\n--- PHASE 4: QUALITY CONTROL PURGE ---")
-    valid_db = {}
-    purged_count = 0
-    
-    for key, card in db.items():
-        is_bad = False
-        if not card.get('name') or card['name'] == "-": is_bad = True
-        if not card.get('image_url'): is_bad = True
-        if not card.get('type'): is_bad = True
-            
-        if is_bad:
-            print(f"    🗑️ Purging {key} (Incomplete Data)")
-            purged_count += 1
-        else:
-            valid_db[key] = card
-
-    print(f"    ✨ Cleanup Complete. Removed {purged_count} invalid records. Kept {len(valid_db)}.")
-    return valid_db
-
-def save_db(db):
-    if len(db) > 0:
-        data_list = list(db.values())
-        print(f"    💾 Checkpoint: Saving {len(data_list)} total cards...")
-        with open(JSON_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data_list, f, indent=2, ensure_ascii=False)
-
 def run_update():
-    deck_map = sync_decks()
+    # 1. Generate Friendly Deck JSON
+    deck_map = generate_friendly_deck_json()
     
-    master_db = {}
+    # 2. Load Existing
+    db = {}
     if os.path.exists(JSON_FILE):
-        print(f"📂 Loading existing {JSON_FILE}...")
         try:
             with open(JSON_FILE, 'r', encoding='utf-8') as f:
-                data_list = json.load(f)
-                for c in data_list:
-                    key = c.get('id', c.get('cardNo'))
-                    if key: master_db[key] = c
+                for c in json.load(f): db[c['id']] = c
         except: pass
+
+    # 3. Scrape Cards
+    print("\n--- PHASE 3: CARD SCRAPING ---")
     
-    sets = discover_sets()
-    
-    print(f"\n--- PHASE 3: CARD AUDIT ({'FULL' if FULL_CHECK else 'INCREMENTAL'}) ---")
-    
-    # 1. PROCESS SPECIAL ASSETS FIRST (Tokens, EX Bases)
-    print("\nProcessing Special Assets (Tokens & EX)...")
-    for asset_id in SPECIAL_ASSETS:
-        found = scrape_card_variants(asset_id, deck_map, existing_db=master_db)
-        if found:
-            for c in found:
-                master_db[c['id']] = c
-                print(f"    💎 Found Special Asset: {c['id']}")
-    
-    # 2. STANDARD SET PROCESSING
-    for set_info in sets:
-        code = set_info['code']
-        limit = set_info['limit']
-        print(f"\nProcessing Set: {code} (Limit {limit})...")
-        miss_streak = 0
-        
-        for i in range(1, limit + 1):
-            base_card_id = f"{code}-{i:03d}"
-            
-            found_variants = scrape_card_variants(base_card_id, deck_map, existing_db=master_db)
-            
-            if found_variants:
-                for new_card_data in found_variants:
-                    c_id = new_card_data['id']
-                    existing_card = master_db.get(c_id)
-                    
-                    if has_changed(existing_card, new_card_data):
-                        status = "UPDATE" if existing_card else "NEW"
-                        print(f"    📝 {status}: {c_id} (Rarity: {new_card_data['rarity']})")        
-                        master_db[c_id] = new_card_data
-                
-                miss_streak = 0
+    # Special Assets
+    for aid in SPECIAL_ASSETS:
+        for c in scrape_card(aid, deck_map):
+            db[c['id']] = c
+            print(f"    💎 Special: {c['id']}")
+
+    # Regular Sets
+    for s in discover_sets():
+        print(f"\nProcessing {s['code']}...")
+        miss = 0
+        for i in range(1, s['limit']+1):
+            cid = f"{s['code']}-{i:03d}"
+            res = scrape_card(cid, deck_map)
+            if res:
+                miss = 0
+                for c in res:
+                    if c['id'] not in db: print(f"    New: {c['id']}")
+                    db[c['id']] = c
             else:
-                miss_streak += 1
-                if miss_streak <= MAX_MISSES:
-                    print(f"    . {base_card_id} not found (Miss {miss_streak}/{MAX_MISSES})")
-                else:
-                    print(f"    🛑 Max misses reached for {code}. Moving to next set.")
-                    break 
-            
-            time.sleep(0.1) 
-            if i % 50 == 0: save_db(master_db)
+                miss += 1
+                if miss > MAX_MISSES: break
+            time.sleep(0.1)
+            if i % 20 == 0: 
+                with open(JSON_FILE, 'w', encoding='utf-8') as f: json.dump(list(db.values()), f, indent=2)
 
-    master_db = purge_bad_data(master_db)
-    save_db(master_db)
-
-    print("\n✅ Update Complete.")
+    # 4. Save Final
+    with open(JSON_FILE, 'w', encoding='utf-8') as f:
+        json.dump(list(db.values()), f, indent=2)
+    print("\n✅ All Done!")
 
 if __name__ == "__main__":
     run_update()
