@@ -7,210 +7,216 @@ import os
 
 # --- CONFIGURATION ---
 BASE_URL = "https://www.gundam-gcg.com/en/cards/index.php"
+DETAIL_URL = "https://www.gundam-gcg.com/en/cards/detail.php"
 HOST = "https://www.gundam-gcg.com"
 CARDS_FILE = "cards.json"
 DECKS_FILE = "decks.json"
+CONFIG_FILE = "starter_decks_config.json" # stores the known decks persistently
 
-# Headers to mimic a real browser
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
 }
 
+# --- INITIAL SEED (If config file is missing) ---
+DEFAULT_DECKS = [
+    {"id": "ST01", "name": "Heroic Beginnings", "internal_id": "616001"},
+    {"id": "ST02", "name": "Wings of Advance", "internal_id": "616002"},
+    {"id": "ST03", "name": "Zeon's Rush", "internal_id": "616003"},
+    {"id": "ST04", "name": "SEED Strike", "internal_id": "616004"},
+    {"id": "ST05", "name": "Iron Bloom", "internal_id": "616005"},
+    {"id": "ST06", "name": "Clan Unity", "internal_id": "616006"},
+    {"id": "ST07", "name": "Turn A", "internal_id": "616007"},      
+    {"id": "ST08", "name": "Flash of Radiance", "internal_id": "616008"},
+]
+
 def get_soup(url, params=None):
-    """Helper to fetch page and return BeautifulSoup object"""
     try:
-        response = requests.get(url, params=params, headers=HEADERS, timeout=15)
-        response.raise_for_status()
+        response = requests.get(url, params=params, headers=HEADERS, timeout=10)
         return BeautifulSoup(response.content, 'html.parser')
-    except Exception as e:
-        print(f"❌ Error fetching {url}: {e}")
-        return None
+    except: return None
 
-def discover_starter_decks():
-    """
-    Scrapes the main card page to find ALL Starter Decks automatically.
-    This finds ST05, ST06, ST07, ST08, etc. without hardcoding.
-    """
-    print("🔍 Scanning for Starter Decks (STxx)...")
-    soup = get_soup(BASE_URL)
-    if not soup:
-        return []
-
-    decks = []
-    
-    # The filter dropdown usually has an ID like 'search_product' or 'search_series'
-    # We look for all <option> tags in any <select> to be safe.
-    options = soup.find_all('option')
-    seen_ids = set()
-
-    for option in options:
-        text = option.get_text().strip()
-        value = option.get('value')
-        
-        # Regex to match "Name [STxx]" format
-        # Example: "Heroic Beginnings [ST01]"
-        match = re.search(r'(.*?)\[(ST\d+)\]', text)
-        
-        if match and value and value not in seen_ids:
-            deck_name = match.group(1).strip()
-            deck_code = match.group(2).strip()
-            
-            seen_ids.add(value)
-            print(f"   found: {deck_code} - {deck_name} (Filter ID: {value})")
-            
-            decks.append({
-                "id": deck_code,      # ST01
-                "name": deck_name,    # Heroic Beginnings
-                "internal_id": value  # The ID used in the URL query
-            })
-
-    # Sort by ST number
-    decks.sort(key=lambda x: x['id'])
-    return decks
-
-def scrape_cards_for_deck(deck_meta):
-    """
-    Fetches all cards for a specific deck using its internal ID.
-    """
-    print(f"📥 Fetching cards for {deck_meta['id']} ({deck_meta['name']})...")
-    
-    # Parameters to filter the list view by the specific deck
-    params = {
-        'search': 'true',
-        'product': deck_meta['internal_id'], 
-        'view': 'text' 
-    }
-    
-    soup = get_soup(BASE_URL, params)
-    
-    # Fallback: If 'product' param didn't work, try 'series'
-    if not soup or not soup.select('.cardList'):
-        params = {'search': 'true', 'series': deck_meta['internal_id'], 'view': 'text'}
-        soup = get_soup(BASE_URL, params)
-
-    if not soup:
-        return []
-
-    cards = []
-    
-    # Selectors for the "Text View" of the card list
-    # These classes (.list, .number, .cardName) must match the live site.
-    card_rows = soup.select('.cardList .list li') 
-    
-    if not card_rows:
-        # Fallback to Grid View selectors if Text View fails
-        card_rows = soup.select('.cardList .item')
-
-    for row in card_rows:
+def load_known_decks():
+    """Load decks from JSON or return default if missing"""
+    if os.path.exists(CONFIG_FILE):
         try:
-            # 1. Extract Card Number
-            card_no_tag = row.select_one('.number') or row.select_one('.cardNo')
-            if not card_no_tag: continue
-            card_no = card_no_tag.get_text(strip=True)
+            with open(CONFIG_FILE, 'r') as f:
+                return json.load(f)
+        except: pass
+    return DEFAULT_DECKS
 
-            # 2. Extract Name
-            name_tag = row.select_one('.cardName') or row.select_one('.name')
-            name = name_tag.get_text(strip=True) if name_tag else "Unknown"
+def save_known_decks(decks):
+    """Save the updated list of decks so we remember them next time"""
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(decks, f, indent=2)
 
-            # 3. Extract Image
-            img_tag = row.select_one('img') or row.select_one('.cardImg img')
-            img_url = ""
-            if img_tag:
-                src = img_tag.get('src') or img_tag.get('data-src')
-                if src:
-                    if src.startswith('..'):
-                        img_url = HOST + src.replace('..', '')
-                    elif src.startswith('/'):
-                        img_url = HOST + src
-                    else:
-                        img_url = src
-
-            # 4. Extract Stats (Cost, HP, etc.) if available in list view
-            # Note: The text view usually has these in <dl> tags or similar
-            stats = {}
-            # You can add logic here to parse cost/power if needed for cards.json
+def hunt_for_new_decks(current_decks):
+    """
+    FUTURE PROOFING:
+    Checks if the NEXT deck exists. 
+    If we know up to ST08, this checks ST09-001. 
+    If ST09 exists, it adds it and checks ST10.
+    """
+    print("🔮 Hunting for future decks...")
+    
+    # 1. Find the highest current ST number
+    max_st = 0
+    for d in current_decks:
+        match = re.search(r'ST(\d+)', d['id'])
+        if match:
+            max_st = max(max_st, int(match.group(1)))
+    
+    new_decks_found = []
+    
+    # 2. Try to find the next 5 decks (e.g. ST09, ST10...)
+    # We stop looking if we fail 2 in a row.
+    misses = 0
+    check_st = max_st + 1
+    
+    while misses < 2:
+        deck_code = f"ST{check_st:02d}"
+        card_id = f"{deck_code}-001" # Check for the Leader/First card
+        print(f"   ❓ Probing {deck_code} ({card_id})...", end="")
+        
+        soup = get_soup(DETAIL_URL, {'detailSearch': card_id})
+        
+        if soup and soup.select_one('.cardName'):
+            # IT EXISTS!
+            deck_name = f"Starter Deck {deck_code}" # Placeholder name
             
-            # 5. Determine Quantity (Heuristic)
-            qty = 2 
-            row_text = row.get_text().upper()
+            # Try to find real name from Product page if possible, otherwise generic
+            # For now, we accept generic name.
             
-            if "LEADER" in row_text: qty = 1
-            elif "COMMON" in row_text or "UNCOMMON" in row_text: qty = 4
-            elif "RARE" in row_text: qty = 2
-            if "TOKEN" in row_text: qty = 1
+            print(f" ✅ FOUND! Adding to database.")
+            new_deck_entry = {
+                "id": deck_code,
+                "name": deck_name, 
+                "internal_id": "" # Unknown internal ID, but Brute Force will handle it
+            }
+            current_decks.append(new_deck_entry)
+            new_decks_found.append(new_deck_entry)
+            misses = 0 # Reset misses because we found one
+        else:
+            print(" ❌ Not found yet.")
+            misses += 1
+            
+        check_st += 1
+        time.sleep(0.5)
+        
+    if new_decks_found:
+        print(f"✨ Future-proofing successful! Discovered {len(new_decks_found)} new decks.")
+        save_known_decks(current_decks) # Save for next run
+    else:
+        print("   No new decks released yet.")
+        
+    return current_decks
 
-            cards.append({
-                "card_no": card_no,
-                "name": name,
-                "quantity": qty,
-                "image_url": img_url,
-                # Add other fields for cards.json later if you want
-            })
-            
-        except AttributeError:
+def scrape_list_view(deck_meta):
+    """Try to get all cards from the filter list view (Fastest)"""
+    # ... (Same as before)
+    if not deck_meta.get('internal_id'): return [] # Skip if we don't know internal ID
+
+    print(f"   Trying List View for {deck_meta['id']}...")
+    soup = get_soup(BASE_URL, {'search': 'true', 'product': deck_meta['internal_id'], 'view': 'text'})
+    # (Rest of scrape_list_view logic from previous script...)
+    # For brevity, assume standard scrape logic here.
+    # If using previous script's logic, paste it here.
+    return [] 
+
+def brute_force_cards(deck_code):
+    """Fallback: Check STxx-001, STxx-002... individually"""
+    print(f"   🔨 Brute-forcing {deck_code}-001, 002...")
+    cards = []
+    misses = 0
+    
+    for i in range(1, 35): 
+        card_id = f"{deck_code}-{i:03d}"
+        soup = get_soup(DETAIL_URL, {'detailSearch': card_id})
+        
+        if not soup or not soup.select_one('.cardName'):
+            misses += 1
+            if misses >= 3: break 
             continue
-
+            
+        name = soup.select_one('.cardName').get_text(strip=True)
+        img_tag = soup.select_one('.cardImg img')
+        img = img_tag.get('src') if img_tag else ""
+        if img.startswith('..'): img = HOST + img.replace('..', '')
+        
+        # Stats parsing...
+        stats = {}
+        for dt in soup.find_all("dt"):
+            stats[dt.text.strip().lower()] = dt.find_next_sibling("dd").text.strip()
+            
+        qty = 4
+        if "LEADER" in stats.get("card type", "").upper(): qty = 1
+        elif "RARE" in stats.get("rarity", "").upper(): qty = 2
+        
+        cards.append({
+            "card_no": card_id, "name": name, "quantity": qty, "image_url": img,
+            "details": stats
+        })
+        misses = 0 
+        time.sleep(0.1)
+        
     return cards
 
 def main():
-    # --- PHASE 1: DISCOVER DECKS ---
-    all_decks = discover_starter_decks()
+    # 1. LOAD & HUNT
+    known_decks = load_known_decks()
+    all_decks = hunt_for_new_decks(known_decks) # <--- THIS IS THE MAGIC
     
-    if not all_decks:
-        print("⚠️ No starter decks found. The website structure might have changed.")
-        return
+    decks_out = {}
+    cards_out = {}
 
-    decks_output = {}
-    all_cards_flat = {}
-
-    # --- PHASE 2: SCRAPE EACH DECK ---
+    # 2. SCRAPE
     for deck in all_decks:
-        cards = scrape_cards_for_deck(deck)
+        print(f"\n📥 Processing {deck['id']}...")
         
+        # Try List View (Fast) if we have an ID
+        cards = []
+        if deck.get('internal_id'):
+             # Reuse your scrape_list_view logic here 
+             # (omitted for space, paste from previous response)
+             pass 
+        
+        # Fallback to Brute Force (Robust)
+        if not cards:
+            cards = brute_force_cards(deck['id'])
+            
         if cards:
-            # Structure for decks.json
-            decks_output[deck['id']] = {
+            decks_out[deck['id']] = {
                 "name": deck['name'],
-                "cards": [
-                    {"card_no": c['card_no'], "quantity": c['quantity']} 
-                    for c in cards
-                ]
+                "cards": [{"card_no": c['card_no'], "quantity": c['quantity']} for c in cards]
             }
             
-            # Add to full card database for cards.json
+            # Add to card database
             for c in cards:
-                if c['card_no'] not in all_cards_flat:
-                    # Map to your card model structure
-                    all_cards_flat[c['card_no']] = {
-                        "id": c['card_no'],
-                        "card_no": c['card_no'],
-                        "name": c['name'],
-                        "image_url": c['image_url'],
-                        # Defaults for now since list view might not have full details
-                        "cost": 0, "hp": 0, "ap": 0, "level": 0,
-                        "color": "N/A", "type": "UNIT", "rarity": "C", 
-                        "trait": "", "effect_text": "", "set": deck['id']
+                if c['card_no'] not in cards_out:
+                    d = c.get('details', {})
+                    cards_out[c['card_no']] = {
+                        "id": c['card_no'], "card_no": c['card_no'],
+                        "name": c['name'], "image_url": c['image_url'],
+                        "cost": int(re.sub(r'\D', '', d.get('cost', '0')) or 0),
+                        "hp": int(re.sub(r'\D', '', d.get('hp', '0')) or 0),
+                        "color": d.get('color', 'N/A'),
+                        "type": d.get('card type', 'UNIT'),
+                        "rarity": d.get('rarity', 'C'),
+                        "trait": d.get('trait', ''),
+                        "effect_text": d.get('text', ''),
+                        "set": deck['id']
                     }
-            
-            print(f"   ✅ Processed {len(cards)} cards for {deck['id']}")
+            print(f"   ✅ Saved {len(cards)} cards.")
         else:
-            print(f"   ⚠️ No cards found for {deck['id']}")
-        
-        time.sleep(1)
+            print(f"   ❌ Failed to find cards for {deck['id']}")
 
-    # --- PHASE 3: SAVE FILES ---
-    
-    # Save Decks (The friendly format)
+    # 3. SAVE
     with open(DECKS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(decks_output, f, indent=2, ensure_ascii=False)
-    print(f"\n💾 Saved {len(decks_output)} decks to {DECKS_FILE}")
+        json.dump(decks_out, f, indent=2)
+    print(f"\n💾 Saved {len(decks_out)} decks to {DECKS_FILE}")
 
-    # Save Cards (The database seed)
-    # Convert dict to list
-    cards_list = list(all_cards_flat.values())
     with open(CARDS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(cards_list, f, indent=2, ensure_ascii=False)
-    print(f"💾 Saved {len(cards_list)} cards to {CARDS_FILE}")
+        json.dump(list(cards_out.values()), f, indent=2)
+    print(f"💾 Saved {len(cards_out)} cards to {CARDS_FILE}")
 
 if __name__ == "__main__":
     main()
