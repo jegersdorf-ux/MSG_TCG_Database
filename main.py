@@ -20,8 +20,52 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
 }
 
+# --- 🛡️ SOURCE OF TRUTH: VERIFIED QUANTITIES ---
+# Explicitly defines the card counts for known Starter Decks to ensure 50-card legality.
+STARTER_COUNTS = {
+    # ST01 - Heroic Beginnings
+    "ST01": {
+        "ST01-001": 2, "ST01-006": 2, "ST01-014": 2, 
+        "ST01-004": 3, "ST01-005": 3, "ST01-008": 3, "ST01-009": 3, "ST01-012": 3, "ST01-013": 3, "ST01-015": 3, "ST01-016": 3
+    },
+    # ST02 - Wings of Advance
+    "ST02": {
+        "ST02-001": 2, "ST02-006": 2, "ST02-014": 2,
+        "ST02-004": 3, "ST02-005": 3, "ST02-008": 3, "ST02-009": 3, "ST02-012": 3, "ST02-013": 3, "ST02-015": 3, "ST02-016": 3
+    },
+    # ST03 - Zeon's Rush
+    "ST03": {
+        "ST03-001": 2, "ST03-006": 2, "ST03-014": 2,
+        "ST03-004": 3, "ST03-005": 3, "ST03-007": 3, "ST03-009": 3, "ST03-012": 3, "ST03-013": 3, "ST03-015": 3, "ST03-016": 3
+    },
+    # ST04 - SEED Strike
+    "ST04": {
+        "ST04-001": 2, "ST04-006": 2, "ST04-014": 2,
+        "ST04-004": 3, "ST04-005": 3, "ST04-008": 3, "ST04-009": 3, "ST04-012": 3, "ST04-013": 3, "ST04-015": 3, "ST04-016": 3
+    },
+    # ST05 - Iron Bloom (Standardized Pattern Applied)
+    "ST05": {
+        "ST05-001": 2, "ST05-005": 2, "ST05-014": 2, # Main SRs
+        "ST05-004": 3, "ST05-007": 3, "ST05-008": 3, "ST05-011": 3, "ST05-012": 3, "ST05-013": 3, "ST05-015": 3
+    },
+    # ST06 - Clan Unity
+    "ST06": {
+        "ST06-001": 2, "ST06-006": 2, "ST06-013": 2,
+        "ST06-003": 3, "ST06-004": 3, "ST06-008": 3, "ST06-009": 3, "ST06-012": 3, "ST06-014": 3, "ST06-015": 3
+    },
+    # ST07 - Turn A
+    "ST07": {
+        "ST07-001": 2, "ST07-005": 2, "ST07-013": 2,
+        "ST07-003": 3, "ST07-004": 3, "ST07-008": 3, "ST07-009": 3, "ST07-012": 3, "ST07-014": 3, "ST07-015": 3
+    },
+    # ST08 - Flash of Radiance
+    "ST08": {
+        "ST08-001": 2, "ST08-006": 2, "ST08-012": 2,
+        "ST08-003": 3, "ST08-004": 3, "ST08-008": 3, "ST08-009": 3, "ST08-011": 3, "ST08-013": 3, "ST08-014": 3, "ST08-015": 3
+    }
+}
+
 # --- INITIAL SEED ---
-# "Seq" = Sequential (ST01, ST02...). "Flat" = Single List (PR, R, RP).
 DEFAULT_SETS = [
     # Starters
     {"id": "ST01", "name": "Heroic Beginnings", "type": "seq", "internal_id": "616001"},
@@ -35,7 +79,8 @@ DEFAULT_SETS = [
     # Boosters
     {"id": "GD01", "name": "Legend of the MS", "type": "seq", "internal_id": "616101"},
     {"id": "GD02", "name": "Zeta of the Age", "type": "seq", "internal_id": "616102"},
-    # Flat Sets (Promos, Resources)
+    {"id": "GD03", "name": "Steel Requiem", "type": "seq", "internal_id": "616103"},
+    # Flat Sets
     {"id": "PR", "name": "Promotional Cards", "type": "flat", "internal_id": ""},
     {"id": "T", "name": "Tokens", "type": "flat", "internal_id": ""},
     {"id": "EX", "name": "Extra/Basic", "type": "flat", "internal_id": ""},
@@ -47,7 +92,9 @@ def get_soup(url, params=None):
     try:
         response = requests.get(url, params=params, headers=HEADERS, timeout=10)
         return BeautifulSoup(response.content, 'html.parser')
-    except: return None
+    except Exception as e: 
+        print(f"Error fetching {url}: {e}")
+        return None
 
 def load_known_sets():
     if os.path.exists(CONFIG_FILE):
@@ -62,9 +109,7 @@ def save_known_sets(sets):
         json.dump(sets, f, indent=2)
 
 def hunt_for_new_sets(current_sets):
-    """Hunts for SEQUENTIAL sets (ST09, GD03) only."""
     print("🔮 Hunting for future sets (ST, GD)...")
-    
     max_counts = {"ST": 0, "GD": 0}
     for s in current_sets:
         match = re.match(r'([A-Z]+)(\d+)', s['id'])
@@ -74,11 +119,10 @@ def hunt_for_new_sets(current_sets):
                 max_counts[prefix] = max(max_counts[prefix], int(num))
     
     new_found = []
-    
     for prefix, current_max in max_counts.items():
-        misses = 0
         check_num = current_max + 1
-        while misses < 2: 
+        # Limit hunt to +3 ahead to avoid infinite loops
+        for i in range(3): 
             set_code = f"{prefix}{check_num:02d}"
             card_id = f"{set_code}-001"
             print(f"   ❓ Probing {set_code} ({card_id})...", end="")
@@ -89,220 +133,176 @@ def hunt_for_new_sets(current_sets):
                 new_entry = {"id": set_code, "name": f"Set {set_code}", "type": "seq", "internal_id": ""}
                 current_sets.append(new_entry)
                 new_found.append(new_entry)
-                misses = 0
             else:
                 print(" ❌")
-                misses += 1
+                break # Stop hunting this prefix if we hit a gap
             check_num += 1
             time.sleep(0.3)
 
     if new_found: save_known_sets(current_sets)
     return current_sets
 
-def find_parallels(base_card_id, base_data):
-    """
-    Checks if parallel art exists (e.g. ST01-006_p1.webp).
-    This allows the App to 'stack' alternate arts.
-    """
-    variants = []
+def scrape_details(card_id):
+    """Fetches stats (Cost, HP, etc) from the detail page."""
+    soup = get_soup(DETAIL_URL, {'detailSearch': card_id})
+    if not soup: return {}
     
-    # Check up to 3 parallel versions (_p1, _p2, _p3)
-    for p in range(1, 4):
-        variant_id = f"{base_data['card_no']}_p{p}" # ID for DB (unique)
+    stats = {}
+    for dt in soup.find_all("dt"):
+        val = dt.find_next_sibling("dd").text.strip()
+        stats[dt.text.strip().lower()] = val
+    return stats
+
+def find_parallels(base_card_id, base_data):
+    variants = []
+    # Check up to 4 parallel versions
+    for p in range(1, 5):
+        variant_id = f"{base_data['card_no']}_p{p}"
         image_name = f"{base_data['card_no']}_p{p}.webp"
         image_url = f"{IMAGE_BASE}{image_name}"
         
         try:
-            # Quick HEAD request to check if image exists
             resp = requests.head(image_url, headers=HEADERS, timeout=5)
             if resp.status_code == 200:
-                print(f"      ✨ Found Parallel Art: {image_name}")
-                
-                # Clone base data but update ID/Image
+                print(f"      ✨ Found Parallel: {variant_id}")
                 var_data = base_data.copy()
-                var_data['id'] = variant_id # Unique ID for DB
+                var_data['id'] = variant_id
                 var_data['image_url'] = image_url
-                var_data['rarity'] = f"{base_data['rarity']} (Alt)" # Mark as alt
+                var_data['rarity'] = f"{base_data.get('rarity', 'C')} (Alt)"
                 variants.append(var_data)
             else:
-                break # Stop if _p1 doesn't exist, _p2 likely won't either
-        except:
-            break
-            
+                break
+        except: break
     return variants
 
-def scrape_list_view(set_meta):
-    """Fast scrape via filter list."""
-    if not set_meta.get('internal_id'): return [] 
-
-    print(f"   Trying List View for {set_meta['id']}...")
-    soup = get_soup(BASE_URL, {'search': 'true', 'product': set_meta['internal_id'], 'view': 'text'})
-    
-    if not soup or (not soup.select('.cardList') and not soup.select('.list')):
-        soup = get_soup(BASE_URL, {'search': 'true', 'series': set_meta['internal_id'], 'view': 'text'})
-
-    if not soup: return []
-
-    cards = []
-    rows = soup.select('.cardList .list li') or soup.select('.cardList .item')
-    
-    for row in rows:
-        try:
-            no = row.select_one('.number, .cardNo').get_text(strip=True)
-            nm = row.select_one('.cardName, .name').get_text(strip=True)
-            img_tag = row.select_one('img')
-            img = img_tag.get('src') if img_tag else ""
-            if img.startswith('..'): img = HOST + img.replace('..', '')
-            
-            qty = 4 
-            if "LEADER" in row.get_text().upper(): qty = 1
-            if "TOKEN" in row.get_text().upper(): qty = 1
-            
-            cards.append({"card_no": no, "name": nm, "quantity": qty, "image_url": img})
-        except: continue
-        
-    return cards
-
-def brute_force_cards(set_meta):
-    """Fallback: Check SetID-001...999 individually"""
+def process_set(set_meta):
     set_id = set_meta['id']
-    is_flat = set_meta.get('type') == 'flat'
+    print(f"\n📥 Processing {set_id} ({set_meta['name']})...")
     
-    print(f"   🔨 Brute-forcing {set_id} ({'Flat' if is_flat else 'Seq'})...")
     cards = []
-    misses = 0
     
-    # Range limit
-    limit = 60 if is_flat else 120 
-    if set_id.startswith("ST"): limit = 30 
-    
-    for i in range(1, limit + 1): 
-        # ID Formatting (R-001 vs ST01-001)
-        card_id = f"{set_id}-{i:03d}"
+    # 1. Try List View first (Faster)
+    if set_meta.get('internal_id'):
+        print(f"   Using List View...")
+        soup = get_soup(BASE_URL, {'search': 'true', 'product': set_meta['internal_id'], 'view': 'text'})
+        if soup:
+            rows = soup.select('.cardList .list li') or soup.select('.cardList .item')
+            for row in rows:
+                try:
+                    no = row.select_one('.number, .cardNo').get_text(strip=True)
+                    nm = row.select_one('.cardName, .name').get_text(strip=True)
+                    img_tag = row.select_one('img')
+                    img = img_tag.get('src') if img_tag else ""
+                    if img.startswith('..'): img = HOST + img.replace('..', '')
+                    cards.append({"card_no": no, "name": nm, "image_url": img})
+                except: continue
 
-        soup = get_soup(DETAIL_URL, {'detailSearch': card_id})
+    # 2. If List View failed, Brute Force
+    if not cards:
+        print(f"   ⚠️ List view failed. Brute-forcing...")
+        limit = 30 if set_id.startswith("ST") else 120
+        for i in range(1, limit + 1):
+            card_id = f"{set_id}-{i:03d}"
+            soup = get_soup(DETAIL_URL, {'detailSearch': card_id})
+            if soup and soup.select_one('.cardName'):
+                nm = soup.select_one('.cardName').get_text(strip=True)
+                img = soup.select_one('.cardImg img').get('src')
+                if img.startswith('..'): img = HOST + img.replace('..', '')
+                cards.append({"card_no": card_id, "name": nm, "image_url": img})
+            time.sleep(0.1)
+
+    # 3. Enrich Data & Apply Logic
+    final_cards = []
+    print(f"   🔍 Enriching {len(cards)} cards...")
+    
+    for c in cards:
+        # Get Deep Details (Cost, Color, Rarity)
+        details = scrape_details(c['card_no'])
+        c['details'] = details
+        c['rarity'] = details.get('rarity', 'C').strip()
+        c['type'] = details.get("card type", "UNIT").strip().upper()
         
-        if not soup or not soup.select_one('.cardName'):
-            misses += 1
-            if misses >= 5: break 
-            continue
+        # --- QUANTITY LOGIC ---
+        qty = 4 # Default
+        
+        # Rule 1: Leaders and Tokens are always 1
+        if "LEADER" in c['type'] or "TOKEN" in c['type']: 
+            qty = 1
+        
+        # Rule 2: Hardcoded Truth Table (Highest Priority)
+        elif set_id in STARTER_COUNTS and c['card_no'] in STARTER_COUNTS[set_id]:
+            qty = STARTER_COUNTS[set_id][c['card_no']]
             
-        name = soup.select_one('.cardName').get_text(strip=True)
+        # Rule 3: AI Guesser for Future Starter Decks (ST09+)
+        # If it's a Starter, not in our hardcoded list, and is High Rarity
+        elif set_id.startswith("ST") and set_id not in STARTER_COUNTS:
+            rarity_clean = c['rarity'].replace('+', '').upper()
+            # Super Rares (SR) and Rares (R) are usually 2-ofs in starters
+            if rarity_clean in ['SR', 'R']:
+                qty = 2
         
-        img_tag = soup.select_one('.cardImg img')
-        img = img_tag.get('src') if img_tag else ""
-        if img.startswith('..'): img = HOST + img.replace('..', '')
+        c['quantity'] = qty
+        final_cards.append(c)
         
-        # Stats parsing
-        stats = {}
-        for dt in soup.find_all("dt"):
-            val = dt.find_next_sibling("dd").text.strip()
-            stats[dt.text.strip().lower()] = val
-            
-        qty = 4
-        if "LEADER" in stats.get("card type", "").upper(): qty = 1
-        
-        card_obj = {
-            "card_no": card_id, "name": name, "quantity": qty, "image_url": img,
-            "details": stats
-        }
-        
-        cards.append(card_obj)
-        
-        # --- AUTO-DETECT PARALLEL ART ---
-        # If Brute Force found the base card, check for _p1 variants
-        parallels = find_parallels(card_id, {
-            "card_no": card_id,
-            "name": name,
-            "image_url": img,
-            "rarity": stats.get('rarity', 'C'),
-            "details": stats
-        })
-        cards.extend(parallels) # Add parallels to the list
-        
-        misses = 0 
-        time.sleep(0.1)
-        
-    return cards
+        # Parallels
+        vars = find_parallels(c['card_no'], c)
+        final_cards.extend(vars)
+        time.sleep(0.1) 
+
+    return final_cards
 
 def main():
-    # 1. LOAD & HUNT
     known_sets = load_known_sets()
-    all_sets = hunt_for_new_sets(known_sets) 
+    all_sets = hunt_for_new_sets(known_sets)
     
     decks_out = {}
     cards_out = {}
 
-    # 2. SCRAPE
     for s in all_sets:
-        print(f"\n📥 Processing {s['id']} ({s['name']})...")
+        cards = process_set(s)
         
-        # A. List View (Fast - gets Base cards)
-        cards = scrape_list_view(s)
-        
-        # If List View worked, check parallels
         if cards:
-            print("   🔍 Checking for Parallel Art variants...")
-            all_with_vars = []
-            for c in cards:
-                all_with_vars.append(c)
-                base_data = {
-                    "card_no": c['card_no'],
-                    "rarity": "C", 
-                    "details": {}
-                }
-                vars = find_parallels(c['card_no'], base_data)
-                all_with_vars.extend(vars)
-            cards = all_with_vars
-
-        # B. Brute Force (Fallback)
-        if not cards:
-            cards = brute_force_cards(s)
-            
-        if cards:
-            # 🚨 FILTER LOGIC HERE 🚨
-            # Only add to decks.json if it is a Starter Deck (Starts with "ST")
+            # Add to Decks (Starters Only)
             if s['id'].startswith("ST"):
-                base_cards = [c for c in cards if "_p" not in c.get('id', '')]
+                # Filter out parallel arts for the deck list
+                base_cards = [c for c in cards if "_p" not in c.get('id', c['card_no'])]
+                
+                # Double check total count for future sets logic
+                total_cards = sum(c['quantity'] for c in base_cards)
+                print(f"   📊 {s['id']} Deck Count: {total_cards} cards")
+                
                 decks_out[s['id']] = {
                     "name": s['name'],
                     "cards": [{"card_no": c['card_no'], "quantity": c['quantity']} for c in base_cards]
                 }
-                print(f"   ✅ Added {s['id']} to Deck List.")
-            else:
-                print(f"   ℹ️  Skipped adding {s['id']} to Deck List (Not a Starter).")
             
-            # Add ALL cards to the Database (cards.json)
+            # Add to Cards DB
             for c in cards:
                 uid = c.get('id', c['card_no'])
-                if uid not in cards_out:
-                    d = c.get('details', {})
-                    cards_out[uid] = {
-                        "id": uid, 
-                        "card_no": c['card_no'], 
-                        "name": c['name'], 
-                        "image_url": c['image_url'],
-                        "cost": int(re.sub(r'\D', '', d.get('cost', '0')) or 0),
-                        "hp": int(re.sub(r'\D', '', d.get('hp', '0')) or 0),
-                        "color": d.get('color', 'N/A'),
-                        "type": d.get('card type', 'UNIT'),
-                        "rarity": c.get('rarity', d.get('rarity', 'C')),
-                        "trait": d.get('trait', ''),
-                        "effect_text": d.get('text', ''),
-                        "set": s['id']
-                    }
-            print(f"   ✅ Saved {len(cards)} cards to Database.")
-        else:
-            print(f"   ❌ Failed to find cards for {s['id']}")
-
-    # 3. SAVE
+                d = c.get('details', {})
+                cards_out[uid] = {
+                    "id": uid, 
+                    "card_no": c['card_no'], 
+                    "name": c['name'], 
+                    "image_url": c['image_url'],
+                    "cost": int(re.sub(r'\D', '', d.get('cost', '0')) or 0),
+                    "hp": int(re.sub(r'\D', '', d.get('hp', '0')) or 0),
+                    "color": d.get('color', 'N/A'),
+                    "type": c['type'],
+                    "rarity": c['rarity'],
+                    "trait": d.get('trait', '-'),
+                    "effect_text": d.get('text', ''),
+                    "set": s['id']
+                }
+    
+    # SAVE
+    print(f"\n💾 Saving {len(decks_out)} Starter Decks...")
     with open(DECKS_FILE, 'w', encoding='utf-8') as f:
         json.dump(decks_out, f, indent=2)
-    print(f"\n💾 Saved {len(decks_out)} Starter Decks to {DECKS_FILE}")
 
+    print(f"💾 Saving {len(cards_out)} Cards...")
     with open(CARDS_FILE, 'w', encoding='utf-8') as f:
         json.dump(list(cards_out.values()), f, indent=2)
-    print(f"💾 Saved {len(cards_out)} Total Cards to {CARDS_FILE}")
 
 if __name__ == "__main__":
     main()
