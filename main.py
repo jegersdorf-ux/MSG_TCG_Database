@@ -21,44 +21,35 @@ HEADERS = {
 }
 
 # --- 🛡️ SOURCE OF TRUTH: VERIFIED QUANTITIES ---
-# Explicitly defines the card counts for known Starter Decks to ensure 50-card legality.
 STARTER_COUNTS = {
-    # ST01 - Heroic Beginnings
     "ST01": {
         "ST01-001": 2, "ST01-006": 2, "ST01-014": 2, 
         "ST01-004": 3, "ST01-005": 3, "ST01-008": 3, "ST01-009": 3, "ST01-012": 3, "ST01-013": 3, "ST01-015": 3, "ST01-016": 3
     },
-    # ST02 - Wings of Advance
     "ST02": {
         "ST02-001": 2, "ST02-006": 2, "ST02-014": 2,
         "ST02-004": 3, "ST02-005": 3, "ST02-008": 3, "ST02-009": 3, "ST02-012": 3, "ST02-013": 3, "ST02-015": 3, "ST02-016": 3
     },
-    # ST03 - Zeon's Rush
     "ST03": {
         "ST03-001": 2, "ST03-006": 2, "ST03-014": 2,
         "ST03-004": 3, "ST03-005": 3, "ST03-007": 3, "ST03-009": 3, "ST03-012": 3, "ST03-013": 3, "ST03-015": 3, "ST03-016": 3
     },
-    # ST04 - SEED Strike
     "ST04": {
         "ST04-001": 2, "ST04-006": 2, "ST04-014": 2,
         "ST04-004": 3, "ST04-005": 3, "ST04-008": 3, "ST04-009": 3, "ST04-012": 3, "ST04-013": 3, "ST04-015": 3, "ST04-016": 3
     },
-    # ST05 - Iron Bloom (Standardized Pattern Applied)
     "ST05": {
-        "ST05-001": 2, "ST05-005": 2, "ST05-014": 2, # Main SRs
+        "ST05-001": 2, "ST05-005": 2, "ST05-014": 2,
         "ST05-004": 3, "ST05-007": 3, "ST05-008": 3, "ST05-011": 3, "ST05-012": 3, "ST05-013": 3, "ST05-015": 3
     },
-    # ST06 - Clan Unity
     "ST06": {
         "ST06-001": 2, "ST06-006": 2, "ST06-013": 2,
         "ST06-003": 3, "ST06-004": 3, "ST06-008": 3, "ST06-009": 3, "ST06-012": 3, "ST06-014": 3, "ST06-015": 3
     },
-    # ST07 - Turn A
     "ST07": {
         "ST07-001": 2, "ST07-005": 2, "ST07-013": 2,
         "ST07-003": 3, "ST07-004": 3, "ST07-008": 3, "ST07-009": 3, "ST07-012": 3, "ST07-014": 3, "ST07-015": 3
     },
-    # ST08 - Flash of Radiance
     "ST08": {
         "ST08-001": 2, "ST08-006": 2, "ST08-012": 2,
         "ST08-003": 3, "ST08-004": 3, "ST08-008": 3, "ST08-009": 3, "ST08-011": 3, "ST08-013": 3, "ST08-014": 3, "ST08-015": 3
@@ -121,7 +112,6 @@ def hunt_for_new_sets(current_sets):
     new_found = []
     for prefix, current_max in max_counts.items():
         check_num = current_max + 1
-        # Limit hunt to +3 ahead to avoid infinite loops
         for i in range(3): 
             set_code = f"{prefix}{check_num:02d}"
             card_id = f"{set_code}-001"
@@ -135,7 +125,7 @@ def hunt_for_new_sets(current_sets):
                 new_found.append(new_entry)
             else:
                 print(" ❌")
-                break # Stop hunting this prefix if we hit a gap
+                break 
             check_num += 1
             time.sleep(0.3)
 
@@ -155,7 +145,6 @@ def scrape_details(card_id):
 
 def find_parallels(base_card_id, base_data):
     variants = []
-    # Check up to 4 parallel versions
     for p in range(1, 5):
         variant_id = f"{base_data['card_no']}_p{p}"
         image_name = f"{base_data['card_no']}_p{p}.webp"
@@ -202,42 +191,44 @@ def process_set(set_meta):
         print(f"   ⚠️ List view failed. Brute-forcing...")
         limit = 30 if set_id.startswith("ST") else 120
         for i in range(1, limit + 1):
-            card_id = f"{set_id}-{i:03d}"
-            soup = get_soup(DETAIL_URL, {'detailSearch': card_id})
-            if soup and soup.select_one('.cardName'):
-                nm = soup.select_one('.cardName').get_text(strip=True)
-                img = soup.select_one('.cardImg img').get('src')
-                if img.startswith('..'): img = HOST + img.replace('..', '')
-                cards.append({"card_no": card_id, "name": nm, "image_url": img})
-            time.sleep(0.1)
+            try:
+                card_id = f"{set_id}-{i:03d}"
+                soup = get_soup(DETAIL_URL, {'detailSearch': card_id})
+                
+                if soup and soup.select_one('.cardName'):
+                    nm = soup.select_one('.cardName').get_text(strip=True)
+                    
+                    # 🛡️ SAFE IMAGE FETCHING (Fixes crash)
+                    img_tag = soup.select_one('.cardImg img')
+                    img = img_tag.get('src') if img_tag else ""
+                    
+                    if img.startswith('..'): img = HOST + img.replace('..', '')
+                    
+                    cards.append({"card_no": card_id, "name": nm, "image_url": img})
+                time.sleep(0.1)
+            except Exception as e:
+                print(f"   ❌ Error processing {card_id}: {e}")
+                continue
 
     # 3. Enrich Data & Apply Logic
     final_cards = []
     print(f"   🔍 Enriching {len(cards)} cards...")
     
     for c in cards:
-        # Get Deep Details (Cost, Color, Rarity)
         details = scrape_details(c['card_no'])
         c['details'] = details
         c['rarity'] = details.get('rarity', 'C').strip()
         c['type'] = details.get("card type", "UNIT").strip().upper()
         
         # --- QUANTITY LOGIC ---
-        qty = 4 # Default
+        qty = 4 
         
-        # Rule 1: Leaders and Tokens are always 1
         if "LEADER" in c['type'] or "TOKEN" in c['type']: 
             qty = 1
-        
-        # Rule 2: Hardcoded Truth Table (Highest Priority)
         elif set_id in STARTER_COUNTS and c['card_no'] in STARTER_COUNTS[set_id]:
             qty = STARTER_COUNTS[set_id][c['card_no']]
-            
-        # Rule 3: AI Guesser for Future Starter Decks (ST09+)
-        # If it's a Starter, not in our hardcoded list, and is High Rarity
         elif set_id.startswith("ST") and set_id not in STARTER_COUNTS:
             rarity_clean = c['rarity'].replace('+', '').upper()
-            # Super Rares (SR) and Rares (R) are usually 2-ofs in starters
             if rarity_clean in ['SR', 'R']:
                 qty = 2
         
@@ -262,21 +253,13 @@ def main():
         cards = process_set(s)
         
         if cards:
-            # Add to Decks (Starters Only)
             if s['id'].startswith("ST"):
-                # Filter out parallel arts for the deck list
                 base_cards = [c for c in cards if "_p" not in c.get('id', c['card_no'])]
-                
-                # Double check total count for future sets logic
-                total_cards = sum(c['quantity'] for c in base_cards)
-                print(f"   📊 {s['id']} Deck Count: {total_cards} cards")
-                
                 decks_out[s['id']] = {
                     "name": s['name'],
                     "cards": [{"card_no": c['card_no'], "quantity": c['quantity']} for c in base_cards]
                 }
             
-            # Add to Cards DB
             for c in cards:
                 uid = c.get('id', c['card_no'])
                 d = c.get('details', {})
@@ -295,8 +278,7 @@ def main():
                     "set": s['id']
                 }
     
-    # SAVE
-    print(f"\n💾 Saving {len(decks_out)} Starter Decks...")
+    print(f"\n💾 Saving {len(decks_out)} Decks...")
     with open(DECKS_FILE, 'w', encoding='utf-8') as f:
         json.dump(decks_out, f, indent=2)
 
