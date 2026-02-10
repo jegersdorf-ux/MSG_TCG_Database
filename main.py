@@ -17,7 +17,7 @@ DECKS_FILE = "decks.json"
 CONFIG_FILE = "set_config.json"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
 # --- 🛡️ SOURCE OF TRUTH: VERIFIED QUANTITIES ---
@@ -132,19 +132,87 @@ def hunt_for_new_sets(current_sets):
     if new_found: save_known_sets(current_sets)
     return current_sets
 
+def extract_rarities(rarity_text):
+    """Splits rarity string into a clean list."""
+    if not rarity_text: return ["-"]
+    parts = re.split(r'[・/,\.\|\u30FB]', rarity_text) 
+    return [p.strip() for p in parts if p.strip()]
+
 def scrape_details(card_id):
-    """Fetches stats (Cost, HP, etc) from the detail page."""
+    """
+    Fetches stats with smart Key Mapping and FAQ extraction.
+    Matches the logic used in the successful JS console test.
+    """
     soup = get_soup(DETAIL_URL, {'detailSearch': card_id})
     if not soup: return {}
     
     stats = {}
+    faq_list = []
+    
+    # --- KEY MAPPER ---
+    # Maps raw site labels to clean JSON keys
+    KEY_MAP = {
+        "cost": "cost",
+        "hp": "hp",
+        "ap": "ap",
+        "color": "color",
+        "type": "type",
+        "card type": "type",
+        "trait": "trait",
+        "link": "link",
+        "zone": "zone",
+        "lv.": "level",
+        "source title": "source",
+        "where to get it": "product_name"
+    }
+
+    # 1. Scrape all DT/DD pairs
     for dt in soup.find_all("dt"):
-        val = dt.find_next_sibling("dd").text.strip()
-        stats[dt.text.strip().lower()] = val
+        raw_label = dt.get_text(strip=True).lower()
+        
+        dd = dt.find_next_sibling("dd")
+        val = dd.get_text(strip=True) if dd else ""
+        
+        # LOGIC: Is it a Stat or an FAQ?
+        if raw_label in KEY_MAP:
+            # It is a known stat
+            stats[KEY_MAP[raw_label]] = val
+        elif raw_label:
+            # It is NOT a known stat -> Treat as FAQ Question
+            # Storing as {Question, Answer} pair
+            faq_list.append({
+                "question": dt.get_text(strip=True),
+                "answer": val
+            })
+            
+    # 2. Scrape Rarity (Explicit Selector)
+    rarity_tag = soup.select_one(".rarity")
+    if rarity_tag:
+        raw_rarity = rarity_tag.get_text(strip=True)
+        stats['rarity_raw'] = raw_rarity
+        stats['rarity_list'] = extract_rarities(raw_rarity)
+        stats['rarity'] = stats['rarity_list'][0]
+    else:
+        stats['rarity'] = stats.get('rarity', 'C')
+        stats['rarity_list'] = [stats['rarity']]
+
+    # 3. Scrape Effect Text (Explicit Selector)
+    text_tag = soup.select_one(".cardDataRow.overview .dataTxt")
+    if text_tag:
+        # get_text with separator handles <br> tags as newlines
+        stats['text'] = text_tag.get_text("\n").strip()
+    else:
+        stats['text'] = ""
+
+    # 4. Attach FAQ
+    stats['faq'] = faq_list
+
     return stats
 
 def find_parallels(base_card_id, base_data):
     variants = []
+    rarity_list = base_data.get('details', {}).get('rarity_list', [])
+    
     for p in range(1, 5):
         variant_id = f"{base_data['card_no']}_p{p}"
         image_name = f"{base_data['card_no']}_p{p}.webp"
@@ -157,7 +225,12 @@ def find_parallels(base_card_id, base_data):
                 var_data = base_data.copy()
                 var_data['id'] = variant_id
                 var_data['image_url'] = image_url
-                var_data['rarity'] = f"{base_data.get('rarity', 'C')} (Alt)"
+                
+                if p < len(rarity_list):
+                    var_data['rarity'] = rarity_list[p]
+                else:
+                    var_data['rarity'] = f"{rarity_list[-1]} (Alt)"
+                    
                 variants.append(var_data)
             else:
                 break
@@ -170,7 +243,7 @@ def process_set(set_meta):
     
     cards = []
     
-    # 1. Try List View first (Faster)
+    # 1. Try List View first
     if set_meta.get('internal_id'):
         print(f"   Using List View...")
         soup = get_soup(BASE_URL, {'search': 'true', 'product': set_meta['internal_id'], 'view': 'text'})
@@ -186,7 +259,7 @@ def process_set(set_meta):
                     cards.append({"card_no": no, "name": nm, "image_url": img})
                 except: continue
 
-    # 2. If List View failed, Brute Force
+    # 2. Brute Force Fallback
     if not cards:
         print(f"   ⚠️ List view failed. Brute-forcing...")
         limit = 30 if set_id.startswith("ST") else 120
@@ -194,23 +267,16 @@ def process_set(set_meta):
             try:
                 card_id = f"{set_id}-{i:03d}"
                 soup = get_soup(DETAIL_URL, {'detailSearch': card_id})
-                
                 if soup and soup.select_one('.cardName'):
                     nm = soup.select_one('.cardName').get_text(strip=True)
-                    
-                    # 🛡️ SAFE IMAGE FETCHING (Fixes crash)
                     img_tag = soup.select_one('.cardImg img')
                     img = img_tag.get('src') if img_tag else ""
-                    
                     if img.startswith('..'): img = HOST + img.replace('..', '')
-                    
                     cards.append({"card_no": card_id, "name": nm, "image_url": img})
                 time.sleep(0.1)
-            except Exception as e:
-                print(f"   ❌ Error processing {card_id}: {e}")
-                continue
+            except: continue
 
-    # 3. Enrich Data & Apply Logic
+    # 3. Enrich Data
     final_cards = []
     print(f"   🔍 Enriching {len(cards)} cards...")
     
@@ -218,11 +284,10 @@ def process_set(set_meta):
         details = scrape_details(c['card_no'])
         c['details'] = details
         c['rarity'] = details.get('rarity', 'C').strip()
-        c['type'] = details.get("card type", "UNIT").strip().upper()
+        c['type'] = details.get("type", "UNIT").strip().upper()
         
-        # --- QUANTITY LOGIC ---
+        # Quantity Logic
         qty = 4 
-        
         if "LEADER" in c['type'] or "TOKEN" in c['type']: 
             qty = 1
         elif set_id in STARTER_COUNTS and c['card_no'] in STARTER_COUNTS[set_id]:
@@ -263,6 +328,8 @@ def main():
             for c in cards:
                 uid = c.get('id', c['card_no'])
                 d = c.get('details', {})
+                
+                # --- FINAL JSON MAPPING ---
                 cards_out[uid] = {
                     "id": uid, 
                     "card_no": c['card_no'], 
@@ -275,6 +342,14 @@ def main():
                     "rarity": c['rarity'],
                     "trait": d.get('trait', '-'),
                     "effect_text": d.get('text', ''),
+                    
+                    # NEW FIELDS
+                    "level": int(d.get('level', 0)),
+                    "zone": d.get('zone', '-'),
+                    "source": d.get('source', '-'),
+                    "product": d.get('product_name', '-'),
+                    "faq": d.get('faq', []),
+                    
                     "set": s['id']
                 }
     
