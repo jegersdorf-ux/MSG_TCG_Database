@@ -253,9 +253,10 @@ def process_set(set_meta):
                 try:
                     no = row.select_one('.number, .cardNo').get_text(strip=True)
                     nm = row.select_one('.cardName, .name').get_text(strip=True)
-                    img_tag = row.select_one('img')
-                    img = img_tag.get('src') if img_tag else ""
-                    if img.startswith('..'): img = HOST + img.replace('..', '')
+                    
+                    # --- FIX: Construct URL manually instead of scraping broken relative paths ---
+                    img = f"{IMAGE_BASE}{no}.webp"
+                    
                     cards.append({"card_no": no, "name": nm, "image_url": img})
                 except: continue
 
@@ -269,9 +270,10 @@ def process_set(set_meta):
                 soup = get_soup(DETAIL_URL, {'detailSearch': card_id})
                 if soup and soup.select_one('.cardName'):
                     nm = soup.select_one('.cardName').get_text(strip=True)
-                    img_tag = soup.select_one('.cardImg img')
-                    img = img_tag.get('src') if img_tag else ""
-                    if img.startswith('..'): img = HOST + img.replace('..', '')
+                    
+                    # --- FIX: Construct URL manually ---
+                    img = f"{IMAGE_BASE}{card_id}.webp"
+                    
                     cards.append({"card_no": card_id, "name": nm, "image_url": img})
                 time.sleep(0.1)
             except: continue
@@ -367,6 +369,7 @@ def main():
                     "type": c['type'],
                     "rarity": c['rarity'],
                     "trait": safe_str('trait'),
+                    "link": safe_str('link'),  # <--- NEW FIELD ADDED HERE
                     "effect_text": safe_str('text', ''),
                     
                     # Extended Fields
