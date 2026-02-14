@@ -1,1 +1,1 @@
-[![Daily Data & Image Update](https://github.com/jegersdorf-ux/Gundam_TCG_Database/actions/workflows/daily_update.yml/badge.svg)](https://github.com/jegersdorf-ux/Gundam_TCG_Database/actions/workflows/daily_update.yml) 
+[![Daily Data & Image Update](https://github.com/jegersdorf-ux/Gundam_TCG_Database/actions/workflows/daily_update.yml/badge.svg)](https://github.com/jegersdorf-ux/Gundam_TCG_Database/actions/workflows/daily_update.yml)  
