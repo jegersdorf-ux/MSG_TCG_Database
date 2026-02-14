@@ -1,5 +1,5 @@
 name: Daily Data & Image Update
-
+ 
 on:
   schedule:
     # Runs every 23 hours (00:00, 12:00 UTC)
